@@ -1,0 +1,10 @@
+name: Luminex_Data_Analysis
+title:
+username: mikamalouf
+account: mikamalouf
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 16090679
+bundleId: 11191285
+url: https://mikamalouf.shinyapps.io/Luminex_Data_Analysis/
+version: 1
