@@ -8,6 +8,11 @@ library(RColorBrewer)
 library(plotly)
 library(lubridate)
 library(tidyr)
+library(proto)
+library(nls2)
+library(lattice)
+library(plyr)
+library(tidyverse)
 
 split_to_list<-function(input,size){
   containers<-list()
@@ -73,46 +78,7 @@ read.batch <- function (path, inc_date=F, inc_plate=F, save_path=NULL) {
 }
 
 
-### ### ### ### ### ### ### ### ### ###
-##### "read.batch.beads" function #####
-### ### ### ### ### ### ### ### ### ###
-read.batch.beads <- function (path,inc_date=F,inc_plate=F) {
-  
-  setwd(path)
-  temp <- list.files(pattern="*.csv")
-  plate_lab <- substr(temp,1,nchar(temp)-4)
-  plate <- list()
-  
-  for(i in 1:length(temp)) { 
-    
-    plate_raw <- read.csv(temp[i])
-    startrow <- grep("DataType",plate_raw[,1])[1]
-    plate[[i]] <- read.csv(temp[i], skip=startrow+1)
-    
-    section1 <- grep("Count",plate[[i]]$Sample)[1]
-    section2 <- grep("Avg Net MFI",plate[[i]]$Sample)
-    
-    plate[[i]] <- plate[[i]][(section1+2):(section2-2),-ncol(plate[[i]])]
-    
-    plate[[i]][,3:ncol(plate[[i]])] <- sapply(plate[[i]][,3:ncol(plate[[i]])],as.character)
-    plate[[i]][,3:ncol(plate[[i]])] <- sapply(plate[[i]][,3:ncol(plate[[i]])],as.numeric)
-    
-    if (inc_date==T) {
-      plate[[i]]$date <- plate_raw[grep("Date",plate_raw[,1]),2]
-      plate[[i]]$date <- as.Date(plate[[i]]$date,"%m/%d/%Y")
-    }
-    
-    if (inc_plate==T) {
-      plate[[i]]$plate <- i
-    
-    }
-  }
-  
-  names(plate) <- plate_lab
-  
-  return(plate)
-  
-}
+
 
 ### ### ### ### ### ### ### ### ### ###
 ##### "read.batch.std_v2" function #####
@@ -315,58 +281,6 @@ join.plates <- function(plates,exc_blank=F) {
   
 }
 
-### ### ### ### ### ### ### ### ### ### #
-##### "plot_beads_by_well" function #####
-### ### ### ### ### ### ### ### ### ### #
-plot_beads_by_well <- function(plate_data, plate_name = NULL, threshold = input$bead_threshold) {
-  # Standardize column name
-  if (!"Well" %in% names(plate_data)) {
-    if ("Location" %in% names(plate_data)) {
-      plate_data <- plate_data %>% dplyr::rename(Well = Location)
-    } else {
-      stop("No 'Well' or 'Location' column found in plate_data")
-    }
-  }
-  
-  # Clean Location from 1(1,A1) -> 1
-  plate_data$Well <- sub(".*,(.*)\\).*", "\\1", plate_data$Well)
-  
-  # Create vector of breaks (first well of each row)
-  x_breaks <- unique(sub("(.)\\d+", "\\11", plate_data$Well))
-  
-  # Remove Total Events (if it is in the dataset)
-  if("Total.Events" %in% names(plate_data)) {
-    plate_data <- plate_data %>%
-      select(-c(Total.Events))
-  }
-  
-  ## Convert to long format to plot
-  bead_data <- plate_data %>%
-    pivot_longer(cols = -c(Sample, Well), names_to = "Antigen", values_to = "BeadCount")
-  
-  bead_data$below_threshold <- bead_data$BeadCount < threshold
-  
-  ## Plot
-  p <- ggplot(bead_data, aes(x = Well, y = BeadCount, group = Antigen)) +
-    geom_line() +
-    geom_point(aes(color = below_threshold), size = 1) +
-    scale_color_manual(values = c("FALSE" = "black", "TRUE" = "red"), guide = "none") +
-    geom_hline(yintercept = threshold, linetype = "dashed") +
-    scale_x_discrete(breaks = x_breaks) +
-    labs(title = ifelse(is.null(plate_name), "Bead counts by well", paste("Bead counts:", plate_name))) +
-    theme_minimal() +
-    theme(strip.text = element_text(size=20),
-          axis.text.y = element_text(size=15),
-          axis.text.x = element_text(hjust = 1, size=15), # angle = 45 (makes the label tilted if needing to fit for size)
-          axis.title = element_text(size = 18),
-          plot.title  = element_text(size = 20, face = "bold"),
-          legend.position="none") + # Remove legend
-    facet_wrap(~Antigen, scales = "free_y", ncol = 2)
-  
-  return(p)
-  
-}
-
 ### ### ### ### ### ### ### ### #
 ##### "get_clean_plate_map" #####
 ### ### ### ### ### ### ### ### #
@@ -426,7 +340,7 @@ convert_dilution <- function(dilution_str) {
 ### ### ### ### ### ### ### ### ### ### ### ### ##
 ##### "plot.std.curve3_interactive" function #####
 ### ### ### ### ### ### ### ### ### ### ### ### ##
-plot.std.curve3_interactive <- function(data_list, antigen, plate_selected, dilutions) {
+plot.std.curve3_interactive <- function(data_list, antigen, plate_selected, dilutions, std_label = NULL) {
   
   # Convert dilution strings → numeric dilution factors
   dilution_numeric <- sapply(dilutions, convert_dilution)
@@ -438,7 +352,7 @@ plot.std.curve3_interactive <- function(data_list, antigen, plate_selected, dilu
   for (i in seq_along(data_list)) {
     plate_data <- data_list[[i]]
     if (!(antigen %in% colnames(plate_data))) next
-    std_curve <- get.standard(plate_data, dilutions)
+    std_curve <- get.standard(plate_data,dilutions,std_label = std_label)
     curves[[ names(data_list)[i]]] <- std_curve[[antigen]]
   }
   
@@ -728,26 +642,188 @@ exclude <- function(data,blank_label=NULL,neg_label=NULL,std_label=NULL) {
 ### ### ### ### ### ### ### ### ###
 ##### "get.standard" function #####
 ### ### ### ### ### ### ### ### ###
+# 1. Normalise dilution labels
+# Examples: 1/100, 1:100 and 1 / 100 become 1/100
 
-# Saves only the data for the standard curve samples to a data object - used for other functions
-get.standard <- function(data, dilutions) {
-  data$Sample <- as.character(data$Sample)
-  dilutions <- trimws(as.character(dilutions))
+normalise_dilution <- function(x) {
   
-  # Add a dilution number column
-  data$dil_no <- NA
-  for (i in seq_along(dilutions)) {
-    hits <- grep(dilutions[i], data$Sample)
-    if (length(hits) > 0) data$dil_no[hits] <- i
+  x <- gsub("\\s+", "", trimws(as.character(x)))
+  
+  vapply(strsplit(x, "[/:]", perl = TRUE), function(parts) {
+    
+    if (length(parts) == 2 &&
+        all(grepl("^[0-9]+$", parts))) {
+      
+      paste0(
+        as.integer(parts[1]), "/",
+        as.integer(parts[2])
+      )
+      
+    } else {
+      NA_character_
+    }
+    
+  }, character(1))
+}
+
+
+# 2. Identify standard names and their dilutions
+
+identify.standards <- function(data, dilutions) {
+  
+  if (!"Sample" %in% names(data)) {
+    stop("The plate data must contain a 'Sample' column.")
   }
   
-  # Order by dilution
-  data <- data[order(data$dil_no, na.last = NA), ]
+  dilutions <- normalise_dilution(dilutions)
+  dilutions <- unique(dilutions[!is.na(dilutions)])
   
-  # Numeric columns
-  data[, 3:ncol(data)] <- sapply(data[, 3:ncol(data)], as.numeric)
-  return(data)
+  result <- data.frame(
+    Sample = as.character(data$Sample),
+    Standard = NA_character_,
+    Dilution = NA_character_,
+    IsStandardCandidate = FALSE,
+    stringsAsFactors = FALSE
+  )
+  
+  for (i in seq_along(result$Sample)) {
+    
+    sample_name <- trimws(result$Sample[i])
+    
+    if (is.na(sample_name) || !nzchar(sample_name)) {
+      next
+    }
+    
+    for (dilution in dilutions) {
+      
+      # Match a dilution at the END of the sample name.
+      # Accept / or : as the dilution separator,
+      # and underscore, space, colon or hyphen before it.
+      
+      parts <- strsplit(dilution, "/", fixed = TRUE)[[1]]
+      
+      dilution_pattern <- paste0(
+        parts[1], "[/:]", parts[2]
+      )
+      
+      pattern <- paste0(
+        "[_[:space:]:-]*",
+        dilution_pattern,
+        "$"
+      )
+      
+      if (grepl(pattern, sample_name, ignore.case = TRUE)) {
+        
+        standard_name <- sub(
+          pattern, "", sample_name,
+          ignore.case = TRUE
+        )
+        
+        standard_name <- trimws(standard_name)
+        
+        if (nzchar(standard_name)) {
+          
+          result$Standard[i] <- standard_name
+          result$Dilution[i] <- dilution
+          result$IsStandardCandidate[i] <- TRUE
+          
+        }
+        
+        break
+      }
+    }
+  }
+  
+  result
 }
+
+
+# 3. Extract the selected standard curve
+
+get.standard <- function(data, dilutions, std_label = NULL, n_points = NULL) {
+  
+  if (!"Sample" %in% names(data)) {
+    stop("The plate data must contain a 'Sample' column.")
+  }
+  
+  original_dilutions <- trimws(as.character(dilutions))
+  dilutions <- normalise_dilution(dilutions)
+  
+  if (length(dilutions) == 0 || anyNA(dilutions)) {
+    stop("Please enter valid dilutions, e.g. 1/50, 1/100, 1/200.")
+  }
+  
+  dilutions <- unique(dilutions)
+  
+  identified <- identify.standards(data, dilutions)
+  
+  # Match the requested standard name, ignoring case
+  if (is.null(std_label)) {
+    keep <- identified$IsStandardCandidate
+  } else {
+    keep <- !is.na(identified$Standard) &
+      identified$IsStandardCandidate &
+      tolower(identified$Standard) == tolower(std_label)
+  }
+  
+  if (!any(keep)) {
+    stop(
+      paste0(
+        "No samples found for standard '", std_label,
+        "' with the specified dilutions."
+      )
+    )
+  }
+  
+  std <- data[keep, , drop = FALSE]
+  
+  std$Dilution <- identified$Dilution[keep]
+  std$Standard <- identified$Standard[keep]
+  
+  # Keep the dilution order entered by the user.
+  # Multiple rows per dilution are allowed for replicates.
+  std$dil_no <- match(std$Dilution, dilutions)
+  
+  std <- std[order(std$dil_no), , drop = FALSE]
+  
+  # Warn about expected dilutions that were not found
+  missing_dilutions <- setdiff(
+    dilutions,
+    unique(std$Dilution)
+  )
+  
+  if (length(missing_dilutions) > 0) {
+    warning(
+      paste0(
+        "Standard '", std_label,
+        "' is missing dilution(s): ",
+        paste(missing_dilutions, collapse = ", ")
+      )
+    )
+  }
+  
+  rownames(std) <- NULL
+  
+  std
+}
+  
+  # data$Sample <- as.character(data$Sample)
+  # dilutions <- trimws(as.character(dilutions))
+  # 
+  # # Add a dilution number column
+  # data$dil_no <- NA
+  # for (i in seq_along(dilutions)) {
+  #   hits <- grep(dilutions[i], data$Sample)
+  #   if (length(hits) > 0) data$dil_no[hits] <- i
+  # }
+  
+#   # Order by dilution
+#   data <- data[order(data$dil_no, na.last = NA), ]
+#   
+#   # Numeric columns
+#   data[, 3:ncol(data)] <- sapply(data[, 3:ncol(data)], as.numeric)
+#   return(data)
+# }
 
     # OTHER OLD CODE
       # get.standard <- function(data, std_label, dilutions, n_points) {
@@ -2293,4 +2369,160 @@ seropos <- function(data,cutoffs,ag_list) {
   
   return(new_data)
   
+}
+
+
+### New for Mika
+
+## Recognise standard names that end in
+identify.standards <- function(data, dilutions) {
+  
+  # Accept either one plate data frame or a list of plates
+  if (is.data.frame(data)) {
+    data <- list(plate1 = data)
+  }
+  
+  dilutions <- trimws(as.character(dilutions))
+  
+  # Escape dilution strings before using them in regular expressions
+  escape.regex <- function(x) {
+    gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", x)
+  }
+  
+  dilution.pattern <- paste(
+    escape.regex(dilutions),
+    collapse = "|"
+  )
+  
+  results <- list()
+  
+  for (plate.name in names(data)) {
+    
+    plate <- data[[plate.name]]
+    
+    if (!"Sample" %in% names(plate)) next
+    
+    sample.names <- trimws(as.character(plate$Sample))
+    
+    # Find a user-specified dilution at the end of each sample name
+    matched.dilution <- regmatches(
+      sample.names,
+      regexpr(
+        paste0("(", dilution.pattern, ")$"),
+        sample.names,
+        perl = TRUE
+      )
+    )
+    
+    has.dilution <- matched.dilution != ""
+    
+    # Remove the dilution and its preceding separator to obtain the name
+    standard.name <- sample.names
+    standard.name[has.dilution] <- sub(
+      paste0("[_ -]?", dilution.pattern, "$"),
+      "",
+      sample.names[has.dilution],
+      perl = TRUE
+    )
+    
+    results[[plate.name]] <- data.frame(
+      Plate = plate.name,
+      Sample = sample.names,
+      Standard = standard.name,
+      Dilution = matched.dilution,
+      IsStandardCandidate = has.dilution,
+      stringsAsFactors = FALSE
+    )
+  }
+  
+  do.call(rbind, results)
+}
+
+
+### New functions
+
+## ### ### ### ### ### ### ###
+##### identify.standards #####
+## ### ### ### ### ### ### ###
+identify.standards <- function(data, dilutions) {
+
+# Accept either one plate or a list of plates
+if (is.data.frame(data)) {
+  data <- list(plate1 = data)
+}
+
+if (is.null(names(data)) || any(names(data) == "")) {
+  names(data) <- paste0("plate", seq_along(data))
+}
+
+dilutions <- unique(trimws(as.character(dilutions)))
+dilutions <- dilutions[!is.na(dilutions) & dilutions != ""]
+
+results <- lapply(names(data), function(plate_name) {
+  
+  plate <- data[[plate_name]]
+  
+  if (!"Sample" %in% names(plate)) {
+    return(NULL)
+  }
+  
+  sample_names <- trimws(as.character(plate$Sample))
+  
+  matched_dilution <- rep(NA_character_, length(sample_names))
+  standard_name <- rep(NA_character_, length(sample_names))
+  
+  for (i in seq_along(sample_names)) {
+    
+    sample <- sample_names[i]
+    
+    if (is.na(sample) || sample == "") next
+    
+    # Find dilutions that occur at the end of this sample name
+    matches <- dilutions[
+      vapply(dilutions, function(x) endsWith(sample, x), logical(1))
+    ]
+    
+    if (length(matches) == 0) next
+    
+    # Use the longest match if more than one dilution matches
+    dilution <- matches[which.max(nchar(matches))]
+    
+    # Remove the dilution suffix and its preceding separator
+    prefix <- substr(
+      sample,
+      1,
+      nchar(sample) - nchar(dilution)
+    )
+    
+    prefix <- sub("[_ -]+$", "", prefix)
+    
+    if (prefix == "") next
+    
+    matched_dilution[i] <- dilution
+    standard_name[i] <- prefix
+  }
+  
+  data.frame(
+    Plate = plate_name,
+    Sample = sample_names,
+    Standard = standard_name,
+    Dilution = matched_dilution,
+    IsStandardCandidate = !is.na(matched_dilution),
+    stringsAsFactors = FALSE
+  )
+})
+
+results <- Filter(Negate(is.null), results)
+
+if (length(results) == 0) {
+  return(data.frame(
+    Plate = character(),
+    Sample = character(),
+    Standard = character(),
+    Dilution = character(),
+    IsStandardCandidate = logical()
+  ))
+}
+
+do.call(rbind, results)
 }

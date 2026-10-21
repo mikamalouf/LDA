@@ -183,10 +183,15 @@ upload_tab_ui <- function() {
               h5(strong("Data Overview"), style = "font-size:150%", align = "center"),
               div(style = "font-size:120%;", tableOutput("upload_summary")),
               br(),
+              
               fluidRow(
                 column(6, tableOutput("plate_table")),
                 column(6, tableOutput("antigen_table"))
-              )
+              ),
+              hr(),
+              h4("Sample Names and Standard Detection"),
+              p("Review the detected standard names and dilution values."),
+              DT::dataTableOutput("sample_names_table")
             )
           )
         )
@@ -194,133 +199,6 @@ upload_tab_ui <- function() {
     )
   )
 }
-
-# upload_tab_ui<-function(){
-#   tabPanel(
-#         "Upload", 
-#         sidebarLayout(
-#             sidebarPanel("", width=3,
-#                          
-#                          # File Upload
-#                          h3(strong("File upload"), style = "font-size:130%"),
-#                            
-#                            # Adds text
-#                            p("Upload your data using the file upload button below.", style = "font-size:120%"),
-#                            p(
-#                              fileInput(
-#                                inputId = "fileUpload",
-#                                label = "",
-#                                multiple = TRUE,
-#                                buttonLabel = "Browse...",
-#                                placeholder = "No file selected"
-#                                ), 
-#                              style = "font-size:120%"),
-#                            
-#                            # Inserts a horizontal line (a divider in the UI)
-#                            hr(),
-#                          
-#                          # Well plate type
-#                            selectInput(
-#                              inputId = "plate_size",
-#                              label = "Select Plate Size",
-#                              choices = c("96 Well" = 96, "384 Well" = 384),
-#                              selected = 96
-#                            ),
-#                          
-#                          # Dilutions
-#                            h3(strong("Dilutions"), style = "font-size:130%"),
-#                            
-#                            div(
-#                              style = "font-size:120%;",
-#                              textOutput("dilutions")
-#                            ),
-#                            
-#                            # Adds a paragraph of text under the heading
-#                            textInput(inputId = "dilutionInput",label=""),
-#                            actionButton("dilutionButton","Submit dilutions"),
-#                            
-#                            # Inserts a horizontal line (a divider in the UI)
-#                            hr(),
-#                          
-#                          # Standard curves
-#                            h3(strong("Standard Curve"), style = "font-size:130%"),
-#                            
-#                            div(
-#                              style = "font-size:120%;",
-#                              textOutput("std_labels"),
-#                              tags$small("Separate multiple standard curves with commas."),
-#                            ),
-#                            
-#                            # Adds a paragraph of text under the heading
-#                            textInput(inputId = "std_labelInput", label=""),
-#                            actionButton("std_labelButton","Submit standard curves"),  
-#                            
-#                            # Inserts a horizontal line (a divider in the UI)
-#                            hr(),
-#                          
-#                          # Background
-#                            h3(strong("Background samples"), style = "font-size:130%"),
-#                            
-#                            div(
-#                              style = "font-size:120%;",
-#                              textOutput("bkg_labels")
-#                            ),
-#                            
-#                            # Adds a paragraph of text under the heading
-#                            textInput(inputId = "bkg_labelInput", label=""),
-#                            actionButton("bkg_labelButton","Submit background samples"),
-#                          
-#                          # Inserts a horizontal line (a divider in the UI)
-#                          hr(),
-#                          
-#                          # Controls
-#                            h3(strong("Control samples (optional)"), style = "font-size:130%"),
-#                            
-#                            div(
-#                              style = "font-size:120%;",
-#                              textOutput("control_labels")
-#                            ),
-#                            
-#                            # Adds a paragraph of text under the heading
-#                            textInput(inputId = "control_labelInput", label=""),
-#                            actionButton("control_labelButton","Submit control samples")
-#             ),
-#       
-#     
-#             mainPanel(
-#               
-#               fluidRow(
-#                 column(12, align="center",
-#                        h1("Luminex Data Analysis"))
-#               ),
-#               
-#               p("Please upload your data using the file upload button on the left. You can upload multiple files at once. Once you have uploaded your data, you can use the tabs on the top of the app to visualise and process your data.",
-#                 style = "font-size:140%"),
-#               
-#               hr(),
-#               
-#               h5(strong("Upload summary"), style = "font-size:150%", align="center"),
-#               
-#               # Upload summary in the main space
-#               div(
-#                 style = "font-size:150%;",
-#                 tableOutput("upload_summary")
-#               ),
-#               
-#               fluidRow(
-#                 column(3, style = "font-size:130%;", tableOutput("plate_table")),
-#                 column(3, style = "font-size:130%;", tableOutput("antigen_table"))
-#             ),
-#             
-#             # Inside upload_tab_ui -> mainPanel
-#               hr(),
-#               h5("Plate Layout Verification"),
-#               plotOutput("plate_layout_map", height = "400px")
-#               
-#         )
-#   )
-#   )
-# }
 
 bead_count_ui <- function() {
   
@@ -391,18 +269,33 @@ concordance_plots_ui <- function(){
     ))
   }
 
-
 std_curve_plots_ui <- function(){
   tabPanel("Standard Curves",
            sidebarLayout(
              sidebarPanel(width = 3,
-                          p("Standard curves show MFI plotted against the log of the dilution.", style="font-size:130%"),
+                          p("Standard curves show MFI plotted against the log of the dilution.", style="font-size:110%"),
                           hr(),
-                          p(strong("Select plates to compare (max 5):"), style="font-size:120%"),
+                          
+                          div(
+                            style = "background-color: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #dee2e6;",
+                            h4(strong("Standard Verification"), style = "font-size: 110%; margin-top: 0; color: #2c3e50;"),
+                            p("Active standard label from Upload page:", style = "font-size: 95%; margin-bottom: 5px;"),
+                            verbatimTextOutput("verified_std_label")
+                          ),
+                          hr(),
+                          
+                          p(strong("Select plates to compare (max 5):"), style="font-size:110%"),
                           uiOutput("std_curve_plate_selection"),
                           hr(),
-                          p(strong("Select antigen:"), style="font-size:120%"),
+                          
+                          p(strong("Select standard series:"), style = "font-size:110%"),
+                          uiOutput("std_curve_standard_selection"),
+                          hr(),
+                          
+                          p(strong("Select antigen:"), style = "font-size:110%"),
                           uiOutput("std_curve_antigen_selection")
+                          # p(strong("Select antigen:"), style="font-size:120%") #,
+                          # uiOutput("std_curve_antigen_selection")
              ),
              mainPanel(
                h4("Standard Curve Plot", align = "center"),
@@ -632,6 +525,7 @@ server <- function(input, output, session) {
   # Read in functions
     source("luminex_dx_functions_v11.R")
     source("normalisation_functions.R")
+    source("bead_plot_function.R")
   
   
   # Set up dilutions
@@ -670,6 +564,23 @@ server <- function(input, output, session) {
         )
       }
     })
+    
+    # On standard curve page
+      # Capture the standard label when the submit button is clicked
+      submitted_std_label <- eventReactive(input$std_labelButton, {
+        req(input$std_labelInput)
+        input$std_labelInput
+      }, ignoreNULL = FALSE)
+      
+      # Render the verification text in the sidebar panel
+      output$verified_std_label <- renderText({
+        lbl <- submitted_std_label()
+        if (is.null(lbl) || lbl == "") {
+          "Warning: No standard label submitted yet. Please submit one on the Upload tab."
+        } else {
+          paste0("✓ Active Standard: ", lbl)
+        }
+      })
     
     
   # Set up background values 
@@ -749,7 +660,7 @@ server <- function(input, output, session) {
         ## Combine plates into one dataset
         d$combinedplates <- join.plates(d$plates)
         
-          ## Skip NAs
+          ### Skip NAs
           d$combinedplates <- na.omit(d$combinedplates)
           for (i in seq_along(d$plates)){
             d$plates[[i]] <- na.omit(d$plates[[i]])
@@ -770,8 +681,8 @@ server <- function(input, output, session) {
         d
     })
     
-    # Create dataset for plate mapping
-    td <- reactive({
+  # Create dataset for plate mapping
+  td <- reactive({
       req(input$fileUpload)
       files <- input$fileUpload
       
@@ -808,8 +719,8 @@ server <- function(input, output, session) {
       ))
     })
     
-    # Reactive to "tag" wells based on user inputs
-    tagged_data <- reactive({
+  # Reactive to "tag" wells based on user inputs
+  tagged_data <- reactive({
         req(td())
         df <- td()$combinedplates
         
@@ -851,8 +762,8 @@ server <- function(input, output, session) {
         return(df)
     })
     
-    # Select plate for plate map
-    output$plate_selection_control <- renderUI({
+  # Select plate for plate map
+  output$plate_selection_control <- renderUI({
       req(td()) # Ensure data is uploaded
       selectInput(
         inputId = "plate_select_map", 
@@ -860,10 +771,43 @@ server <- function(input, output, session) {
         choices = td()$platenames
       )
     })
+  
+  # Identify all standard curves from uploaded plate data
+  standard_info <- reactive({
+    
+    req(d(), user_dilutions())
+    
+    all_standards <- lapply(d()$plates, function(plate_data) {
+      identify.standards(plate_data, user_dilutions())
+    })
+    
+    unique_standards <- unique(unlist(lapply(
+      all_standards,
+      function(x) {
+        x$Standard[!is.na(x$Standard) & nzchar(x$Standard)]
+      }
+    )))
+    
+    sort(unique_standards)
+  })
+  
+  
+  # Show the detected standard curves in a dropdown
+  output$std_curve_standard_selection <- renderUI({
+    
+    req(standard_info())
+    
+    selectInput(
+      inputId = "std_curve_standard",
+      label = "Standard curve:",
+      choices = standard_info(),
+      selected = standard_info()[1]
+    )
+  })
     
     
-    # Render the Plate Map Plot
-    output$plate_layout_map <- renderPlot({
+  # Render the Plate Map Plot
+  output$plate_layout_map <- renderPlot({
       req(tagged_data())
       req(input$plate_select_map)
       req(input$plate_size)
@@ -913,7 +857,7 @@ server <- function(input, output, session) {
     })
     
   # Data preparation beads - Reactive for bead count
-    bead_data <- reactive({
+  bead_data <- reactive({
         
         # Make sure a file has been uploaded
         req(input$fileUpload)
@@ -955,40 +899,60 @@ server <- function(input, output, session) {
         bead_data$combineddatesplates <- join.plates(bead_data$datesplates)
         bead_data
         })
+  
+  # Bead threshold adjustment
+    ## Set default beads
+    bead_control <- reactiveValues(threshold = 30)
+    
+    ## Update bead threshold from 30 if the user defines an alternative amount
+    observeEvent(input$bead_threshold, {
+      # Only update if numeric and not NA
+      if (!is.null(input$bead_threshold) && !is.na(as.numeric(input$bead_threshold))) {
+        bead_control$threshold <- as.numeric(input$bead_threshold)
+      }
+    })
+    
+    ## Update plate selection dropdown
+    observe({
+      req(bead_data())
+      updateSelectInput(
+        session,
+        "plate_selection",
+        choices = names(bead_data()$plates),
+        selected = names(bead_data()$plates)[1]
+      )
+    })
     
   # Data preparation - Reactive for standard curve
     std_data <- reactive({
+      req(d())
       
-      # Make sure a file has been uploaded
-      req(input$fileUpload)
-        
-      # Extract the folder path and the file label, drop .csv extension
-      raw_data_path <- dirname(input$fileUpload[1,"datapath"])
-      plate_lab <- substr(input$fileUpload$name,1,nchar(input$fileUpload$name)-4)
-        
-      # Reading uploaded data
-      std_data = list()
-      std_data$rawdatapath <- raw_data_path
-      std_data$uploadedfilenumber <- nrow(input$fileUpload)
-        
-        ## Load batch data from the uploaded files
-        std_data$plates <- read.plate(file_name = std_data$uploadedfilenumber, path = std_data$rawdatapath)
-        
-        ## Assign user-friendly names to the plates
-        names(std_data$plates)<-plate_lab
-    
-        std_data
-      
-                    # Original code
-                    # req(tagged_data())
-                    # data <- tagged_data()
-                    # # Filter only Standards
-                    # stds <- data[data$Well_Type == "Standard", ]
-                    # 
-                    # # Simple logic: assume standards are named P1, P2... and calculate dilution
-                    # # You can expand this based on your specific Dilution Factor input
-                    # list(plates = split(stds, stds$Plate_Name))
+      list(
+        plates = d()$plates,
+        platenames = d()$platenames
+      )
     })
+    
+    # Reactive expression to find all unique matching standard patterns in the uploaded plates
+    available_standards <- reactive({
+      req(std_data())
+      
+      identified <- identify.standards(
+        data = std_data()$plates,
+        dilutions = user_dilutions()
+      )
+      
+      standards <- unique(
+        identified$Standard[
+          identified$IsStandardCandidate &
+            !is.na(identified$Standard) &
+            identified$Standard != ""
+        ]
+      )
+      
+      sort(standards)
+    })
+      
   
   # Create a reactive that extracts antigen column names from the uploaded data for app use
   ag <- reactive({
@@ -1036,28 +1000,7 @@ server <- function(input, output, session) {
         d
     })
     
-  # Bead threshold adjustment
-    ## Set default beads
-    bead_control <- reactiveValues(threshold = 30)
-      
-    ## Update bead threshold from 30 if the user defines an alternative amount
-    observeEvent(input$bead_threshold, {
-        # Only update if numeric and not NA
-        if (!is.null(input$bead_threshold) && !is.na(as.numeric(input$bead_threshold))) {
-          bead_control$threshold <- as.numeric(input$bead_threshold)
-        }
-      })
-      
-    ## Update plate selection dropdown
-    observe({
-        req(bead_data())
-        updateSelectInput(
-          session,
-          "plate_selection",
-          choices = names(bead_data()$plates),
-          selected = names(bead_data()$plates)[1]
-        )
-      })
+  
 
   # Upload summary: number of files, number of plates, antigens
         output$upload_summary<- renderText({
@@ -1084,6 +1027,26 @@ server <- function(input, output, session) {
         output$plate_table<-renderTable({
             req(input$fileUpload)
             data.frame(Plates=d()$platenames)
+        })
+        
+        # Show the sample names and automatically detected standards
+        output$sample_names_table <- DT::renderDataTable({
+          
+          req(std_data())
+          
+          identified <- identify.standards(
+            data = std_data()$plates,
+            dilutions = user_dilutions()
+          )
+          
+          DT::datatable(
+            identified,
+            options = list(
+              pageLength = 15,
+              scrollX = TRUE
+            ),
+            rownames = FALSE
+          )
         })
           
     output$download_button <- renderUI({
@@ -1161,9 +1124,106 @@ server <- function(input, output, session) {
 
     # Standard Curves
     output$std_table <- DT::renderDataTable({
+      
       req(std_data())
-      DT::datatable(std_data()$plates[[1]], options = list(pageLength = 10, scrollX = TRUE))
+      req(user_dilutions())
+      
+      plates <- std_data()$plates
+      dilutions <- user_dilutions()
+      
+      # Get the standard names submitted on the Upload page
+      labels <- submitted_standards()
+      
+      # Identify matching standards on every plate
+      standard_tables <- lapply(names(plates), function(plate_name) {
+        
+        plate_data <- plates[[plate_name]]
+        
+        identified <- identify.standards(
+          plate_data,
+          dilutions
+        )
+        
+        # Retain only identified standard samples
+        keep <- identified$IsStandardCandidate &
+          !is.na(identified$Standard)
+        
+        # Restrict to submitted standard names
+        if (length(labels) > 0) {
+          keep <- keep &
+            tolower(identified$Standard) %in% tolower(labels)
+        }
+        
+        if (!any(keep)) {
+          return(NULL)
+        }
+        
+        result <- plate_data[keep, , drop = FALSE]
+        
+        result$Plate <- plate_name
+        result$Standard <- identified$Standard[keep]
+        result$MatchedDilution <- identified$Dilution[keep]
+        
+        result$DilutionOrder <- match(
+          result$MatchedDilution,
+          normalise_dilution(dilutions)
+        )
+        
+        result <- result[
+          order(result$Standard, result$DilutionOrder),
+          ,
+          drop = FALSE
+        ]
+        
+        result
+      })
+      
+      # Remove plates without matching standards
+      standard_tables <- Filter(
+        Negate(is.null),
+        standard_tables
+      )
+      
+      validate(need(
+        length(standard_tables) > 0,
+        "No standard-curve samples matched your submitted standard names and dilutions."
+      ))
+      
+      # Combine matching samples across all plates
+      combined <- do.call(rbind, standard_tables)
+      rownames(combined) <- NULL
+      
+      DT::datatable(
+        combined,
+        options = list(pageLength = 25, scrollX = TRUE),
+        rownames = FALSE
+      )
     })
+    
+    submitted_standards <- reactiveVal(character(0))
+    
+    observeEvent(input$std_labelButton, {
+      
+      labels <- trimws(
+        unlist(strsplit(input$std_labelInput, ",", fixed = TRUE))
+      )
+      
+      labels <- unique(labels[nzchar(labels)])
+      
+      submitted_standards(labels)
+      
+      output$std_labels <- renderText({
+        if (length(labels) == 0) {
+          "No standard curves submitted."
+        } else {
+          paste(
+            "Submitted standard curves:",
+            paste(labels, collapse = ", ")
+          )
+        }
+      })
+    })
+    
       
       # Allow user to select up to 5 plates for comparison (compare standard curves visually) 
     output$std_curve_plate_selection <- renderUI({
@@ -1178,66 +1238,207 @@ server <- function(input, output, session) {
       )
     })
     
+    # Parse standard labels entered by the user (comma or newline separated)
+    parsed_standards <- reactive({
+      req(input$std_labelInput)
+      labs <- trimws(unlist(strsplit(input$std_labelInput, "[,\\n]+")))
+      labs[labs != ""]
+    })
+    
+    # Update the dropdown to show the parsed standards instead of antigens
+    output$std_curve_standard_selection <- renderUI({
+      
+      standards <- available_standards()
+      
+      validate(
+        need(
+          length(standards) > 0,
+          paste(
+            "No standard series detected.",
+            "Check the sample names and submitted dilutions on the Upload tab."
+          )
+        )
+      )
+      
+      selectInput(
+        inputId = "std_curve_standard_choice",
+        label = "",
+        choices = standards,
+        selected = standards[1]
+      )
+    })
+    
+    # Dropdown for antigens
     output$std_curve_antigen_selection <- renderUI({
+      
       req(d())
+      
       selectInput(
         inputId = "std_curve_antigen",
         label = "",
-        choices = ag(),
-        selected = ag()[1]
+        choices = d()$ags,
+        selected = d()$ags[1]
       )
     })
     
     output$std_curve_plot <- renderPlotly({
+      
       req(std_data())
       req(input$std_curve_input)
       req(input$std_curve_antigen)
+      req(input$std_curve_standard_choice)
       
-      antigen      <- input$std_curve_antigen
-      dil_col      <- paste0(antigen, "_dilution")
-      selected     <- input$std_curve_input
+      selected_std <- input$std_curve_standard_choice
+      selected_plates <- input$std_curve_input
+      antigen <- input$std_curve_antigen
+      dilutions <- normalise_dilution(user_dilutions())
       
-      df_list <- lapply(selected, function(plate_name) {
+      req(length(dilutions) > 0, !anyNA(dilutions))
+      
+      # Extract the denominator: 1/50 -> 50, 1/100 -> 100
+      dilution_factor <- function(x) {
+        vapply(strsplit(x, "/", fixed = TRUE), function(parts) {
+          if (length(parts) == 2) {
+            as.numeric(parts[2]) / as.numeric(parts[1])
+          } else {
+            NA_real_
+          }
+        }, numeric(1))
+      }
+      
+      # Process each selected plate
+      df_list <- lapply(selected_plates, function(plate_name) {
+        
         pd <- std_data()$plates[[plate_name]]
         
-        validate(need(antigen %in% names(pd),
-                      paste("Antigen", antigen, "not found in plate", plate_name)))
-        validate(need(dil_col %in% names(pd),
-                      paste("No dilution data for", antigen, "in plate", plate_name,
-                            "— check that std_labels match your Sample column (e.g. P1, P2...)")))
+        if (is.null(pd) || !"Sample" %in% names(pd)) {
+          return(NULL)
+        }
+        
+        if (!antigen %in% names(pd)) {
+          return(NULL)
+        }
+        
+        # Identify standards using the user's dilution list
+        identified <- identify.standards(pd, dilutions)
+        
+          print(data.frame(
+            Sample = pd$Sample,
+            Standard = identified$Standard,
+            Dilution = identified$Dilution,
+            Candidate = identified$IsStandardCandidate
+          ))
+          
+          print(paste("Selected standard:", selected_std))
+          print(paste("Entered dilutions:", paste(dilutions, collapse = ", ")))
+        
+        # Keep ONLY the selected standard and requested dilutions
+          print(unique(identified$Standard))
+          print(unique(identified$Dilution))
+          print(selected_std)
+          
+          keep <- !is.na(identified$Standard) &
+            tolower(trimws(identified$Standard)) ==
+            tolower(trimws(selected_std)) &
+            identified$Dilution %in% dilutions
+          
+          print(table(keep, useNA = "ifany"))
+        
+        if (!any(keep)) {
+          return(NULL)
+        }
+        
+        matched_dilutions <- identified$Dilution[keep]
         
         data.frame(
-          Plate    = plate_name,
-          Dilution = pd[[dil_col]],      # actual numeric dilution factor from the file
-          MFI      = pd[[antigen]],
-          Sample   = pd$Sample
+          Plate = plate_name,
+          Sample = as.character(pd$Sample[keep]),
+          Standard = identified$Standard[keep],
+          Dilution = matched_dilutions,
+          DilutionNumeric = dilution_factor(matched_dilutions),
+          MFI = suppressWarnings(
+            as.numeric(as.character(pd[[antigen]][keep]))
+          ),
+          stringsAsFactors = FALSE
         )
       })
       
-      df <- do.call(rbind, Filter(Negate(is.null), df_list))
-      df <- df[!is.na(df$Dilution) & !is.na(df$MFI) & df$MFI > 0, ]
+      # Remove plates without matching samples
+      df_list <- Filter(
+        function(x) !is.null(x) && nrow(x) > 0,
+        df_list
+      )
       
-      validate(need(nrow(df) > 0,
-                    "No plottable standard curve data. Check your std_labels input matches Sample names (e.g. P1, P2...)."))
+      validate(need(
+        length(df_list) > 0,
+        paste0(
+          "No samples matched standard '", selected_std,
+          "' and the entered dilutions: ",
+          paste(dilutions, collapse = ", ")
+        )
+      ))
       
-      df$LogDilution <- log10(df$Dilution)
-      df$LogMFI      <- log10(df$MFI)
+      df <- do.call(rbind, df_list)
       
-      p <- ggplot(df, aes(x = LogDilution, y = LogMFI, color = Plate, group = Plate,
-                          text = paste0("Plate: ", Plate,
-                                        "<br>Sample: ", Sample,
-                                        "<br>Dilution: ", round(Dilution, 5),
-                                        "<br>MFI: ", round(MFI, 1)))) +
+      # Retain valid positive measurements and dilution factors
+      df <- df[
+        !is.na(df$MFI) &
+          is.finite(df$MFI) &
+          df$MFI > 0 &
+          !is.na(df$DilutionNumeric) &
+          is.finite(df$DilutionNumeric) &
+          df$DilutionNumeric > 0,
+        ,
+        drop = FALSE
+      ]
+      
+      validate(need(
+        nrow(df) > 0,
+        "No valid positive MFI and dilution values are available to plot."
+      ))
+      
+      # Order points according to the user's entered dilutions
+      df$DilutionOrder <- match(df$Dilution, dilutions)
+      
+      df <- df[
+        order(df$Plate, df$DilutionOrder),
+        ,
+        drop = FALSE
+      ]
+      
+      df$LogDilution <- log10(df$DilutionNumeric)
+      df$LogMFI <- log10(df$MFI)
+      
+      p <- ggplot(
+        df,
+        aes(
+          x = LogDilution,
+          y = LogMFI,
+          color = Plate,
+          group = Plate,
+          text = paste0(
+            "Plate: ", Plate,
+            "<br>Sample: ", Sample,
+            "<br>Standard: ", Standard,
+            "<br>Dilution: ", Dilution,
+            "<br>MFI: ", round(MFI, 1)
+          )
+        )
+      ) +
         geom_line(linewidth = 1) +
         geom_point(size = 2.5) +
         labs(
-          title = paste("Standard Curve —", antigen),
-          x     = "Log10 Dilution Factor",
-          y     = "Log10 MFI",
+          title = paste(
+            "Standard Curve -", selected_std, "-", antigen
+          ),
+          x = "Log10 Dilution Factor",
+          y = "Log10 MFI",
           color = "Plate"
         ) +
         theme_minimal(base_size = 13) +
-        theme(axis.text.x = element_text(angle = 35, hjust = 1))
+        theme(
+          axis.text.x = element_text(angle = 35, hjust = 1)
+        )
       
       ggplotly(p, tooltip = "text", height = 550)
     })

@@ -21,6 +21,46 @@ split_to_list<-function(input,size){
   containers
 }
 
+### ### ### ### ### ### ### ### ### ###
+##### "read.batch.beads" function #####
+### ### ### ### ### ### ### ### ### ###
+read.batch.beads <- function (path,inc_date=F,inc_plate=F) {
+  
+  setwd(path)
+  temp <- list.files(pattern="*.csv")
+  plate_lab <- substr(temp,1,nchar(temp)-4)
+  plate <- list()
+  
+  for(i in 1:length(temp)) { 
+    
+    plate_raw <- read.csv(temp[i])
+    startrow <- grep("DataType",plate_raw[,1])[1]
+    plate[[i]] <- read.csv(temp[i], skip=startrow+1)
+    
+    section1 <- grep("Count",plate[[i]]$Sample)[1]
+    section2 <- grep("Avg Net MFI",plate[[i]]$Sample)
+    
+    plate[[i]] <- plate[[i]][(section1+2):(section2-2),-ncol(plate[[i]])]
+    
+    plate[[i]][,3:ncol(plate[[i]])] <- sapply(plate[[i]][,3:ncol(plate[[i]])],as.character)
+    plate[[i]][,3:ncol(plate[[i]])] <- sapply(plate[[i]][,3:ncol(plate[[i]])],as.numeric)
+    
+    if (inc_date==T) {
+      plate[[i]]$date <- plate_raw[grep("Date",plate_raw[,1]),2]
+      plate[[i]]$date <- as.Date(plate[[i]]$date,"%m/%d/%Y")
+    }
+    
+    if (inc_plate==T) {
+      plate[[i]]$plate <- i
+      
+    }
+  }
+  
+  names(plate) <- plate_lab
+  
+  return(plate)
+  
+}
 
 ### ### ### ### ### ### ### ### ### ###
 ##### "read.batch.beads" function #####
