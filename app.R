@@ -1065,19 +1065,23 @@ server <- function(input, output, session) {
     req(concordance_data(), input$concordance_antigens)
     
     df <- concordance_data()
-    df <- df[df$Antigen %in% input$concordance_antigens, , drop = FALSE]
+    selected_antigens <- input$concordance_antigens
     
-    selected_antigens <- intersect(
-      input$concordance_antigens,
-      unique(concordance_data()$Antigen)
-    )
+    df <- df[df$Antigen %in% selected_antigens, , drop = FALSE]
+    
+    validate(need(nrow(df) > 0, "No matched measurements for the selected antigens."))
+    
+    # Remove missing or non-finite measurements
+    df <- df[is.finite(df$MFI_X) & is.finite(df$MFI_Y), ,drop = FALSE]
+    
+    validate(need(nrow(df) > 0, "No valid paired MFI measurements available."))
+    
+    # Order in antigen selection
+    df$Antigen <- factor(df$Antigen, levels = selected_antigens)
+    
     n_ags <- length(selected_antigens)
     n_rows <- ceiling(length(selected_antigens) / 3)
     plot_height <- max(600, n_rows * 320)
-    
-    validate(
-      need(nrow(df) > 0, "No matched measurements for the selected antigens.")
-    )
     
     # Create informative hover labels for every point
     df$HoverLabel <- paste0(
@@ -1091,68 +1095,63 @@ server <- function(input, output, session) {
       format(round(df$MFI_Y - df$MFI_X, 1), big.mark = ",")
     )
     
-    # Keep the antigen order from the selection
-    selected_antigens <- input$concordance_antigens
-    selected_antigens <- selected_antigens[
-      selected_antigens %in% unique(df$Antigen)
-    ]
-    
-    # Build each antigen plot separately
-    plot_list <- lapply(selected_antigens, function(antigen_name) {
-      
-      antigen_df <- df[
-        df$Antigen == antigen_name, ,
-        drop = FALSE
-      ]
-      
-      # Plot
-      p <- ggplot(antigen_df, aes(x = MFI_X, y = MFI_Y)) +
-        geom_abline(
-          intercept = 0, slope = 1,
-          linetype = "dashed", colour = "cornflowerblue") +
-        geom_point(aes(text = HoverLabel), size = 2.5) +
-        labs(
-          title = paste("Plate Concordance:", input$plate_selection_x, "vs", input$plate_selection_y),
-          x = paste(input$plate_selection_x, " MFI"),
-          y = paste(input$plate_selection_y, " MFI")
-        ) +
+    # Plot
+    p <- ggplot(df, aes(x = MFI_X, y = MFI_Y)) +
+      geom_abline(
+        intercept = 0, slope = 1,
+        linetype = "dashed", colour = "cornflowerblue") +
+      geom_point(aes(text = HoverLabel), size = 2.5) +
+      facet_wrap(~ Antigen, scales = "free", ncol = 3) +
+      labs(
+        title = paste("Plate Concordance:", input$plate_selection_x, "vs", input$plate_selection_y),
+        x = paste(input$plate_selection_x, " MFI"),
+        y = paste(input$plate_selection_y, " MFI")
+      ) +
         theme_minimal(base_size = 13) +
         theme(
-          strip.text = ggplot2::element_text(face = "bold"),
-          plot.title = ggplot2::element_text(face = "bold"),
-          panel.grid.minor = ggplot2::element_blank(),
+          strip.text = element_text(face = "bold"),
+          plot.title = element_text(face = "bold"),
+          panel.grid.minor = element_blank(),
           aspect.ratio = 1,
-          plot.margin = ggplot2::margin(8, 8, 8, 8)
-        ) +
-        facet_wrap(~ Antigen, scales = "free", ncol = 3)
+          plot.margin = margin(8, 8, 8, 8)
+        )
+    
+    # Convert the complete faceted plot to Plotly
+    n_rows <- ceiling(length(unique(df$Antigen)) / 3)
+    plot_height <- max(600, n_rows * 320)
       
-      # Convert to an interactive Plotly chart
-      plotly::ggplotly(p, height = plot_height, tooltip = "text") 
-    })
-    
-    # Arrange the separate plots into three columns
-    n_rows <- ceiling(length(plot_list) / 3)
-    
-    combined_plot <- plotly::subplot(
-      plot_list,
-      nrows = n_rows,
-      shareX = FALSE, shareY = FALSE,
-      titleX = TRUE, titleY = TRUE, margin = 0.06
-    )
-    
-    # Add an overall title and responsive layout
-    combined_plot |>
+    # Convert to an interactive Plotly chart
+    plotly::ggplotly(p, height = plot_height, tooltip = "text") |>
       plotly::layout(
-        title = list(
-          text = paste("Plate Concordance:", input$plate_selection_x, "vs", input$plate_selection_y),
-          x = 0.5),
         autosize = TRUE,
-        margin = list(l = 65, r = 25, t = 85, b = 65)
+        margin = list(l = 65, r = 25, t = 80, b = 65)
       ) |>
-      plotly::config(
-        responsive = TRUE
-      )
-  })
+      plotly::config(responsive = TRUE)
+   })
+  #   
+  #   # Arrange the separate plots into three columns
+  #   n_rows <- ceiling(length(plot_list) / 3)
+  #   
+  #   combined_plot <- plotly::subplot(
+  #     plot_list,
+  #     nrows = n_rows,
+  #     shareX = FALSE, shareY = FALSE,
+  #     titleX = TRUE, titleY = TRUE, margin = 0.06
+  #   )
+  #   
+  #   # Add an overall title and responsive layout
+  #   combined_plot |>
+  #     plotly::layout(
+  #       title = list(
+  #         text = paste("Plate Concordance:", input$plate_selection_x, "vs", input$plate_selection_y),
+  #         x = 0.5),
+  #       autosize = TRUE,
+  #       margin = list(l = 65, r = 25, t = 85, b = 65)
+  #     ) |>
+  #     plotly::config(
+  #       responsive = TRUE
+  #     )
+  # })
   
   # ---- Concordance stats table by antigen ----- #
   # Calculate concordance statistics separately for each antigen
