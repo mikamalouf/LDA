@@ -833,6 +833,8 @@ server <- function(input, output, session) {
     )
   })
   
+  
+  # ---- Prepare matchd concordance across plates ----
   # Prepare matched standard-control MFI measurements
   concordance_data <- reactive({
     
@@ -1015,12 +1017,63 @@ server <- function(input, output, session) {
     matched
   })
   
-  # Plot one scatterplot per antigen
+  # ------ Size concordance plots like with the bead-count plots ------ #
+  output$concordance_plot_ui <- renderUI({
+    
+    req(concordance_data(), input$concordance_antigens)
+    
+    selected_antigens <- intersect(
+      input$concordance_antigens,
+      unique(concordance_data()$Antigen)
+    )
+    
+    req(length(selected_antigens) > 0)
+    
+    n_ags <- length(selected_antigens)
+    n_rows <- ceiling(length(selected_antigens) / 3)
+    plot_height <- max(600, n_rows * 320)
+    
+    plotlyOutput("concordance_plot", height = paste0(plot_height, "px"))
+  })
+  
+  # output$concordance_plot_ui <- renderUI({
+  #   
+  #   req(concordance_data(), input$concordance_antigens)
+  #   
+  #   selected_antigens <- intersect(
+  #     input$concordance_antigens,
+  #     unique(concordance_data()$Antigen)
+  #   )
+  #   
+  #   req(length(selected_antigens) > 0)
+  #   
+  #   # Three antigen plots per row
+  #   n_rows <- ceiling(length(selected_antigens) / 3)
+  #   
+  #   # Approximate square panels
+  #   plot_height <- max(400, n_rows * 300)
+  #   
+  #   plotlyOutput(
+  #     "concordance_plot",
+  #     height = paste0(plot_height, "px")
+  #   )
+  # })
+  
+  # ----- Plot one concordance scatterplot per antigen ----- #
   output$concordance_plot <- plotly::renderPlotly({
+    
     req(concordance_data(), input$concordance_antigens)
     
     df <- concordance_data()
     df <- df[df$Antigen %in% input$concordance_antigens, , drop = FALSE]
+    
+    selected_antigens <- intersect(
+      input$concordance_antigens,
+      unique(concordance_data()$Antigen)
+    )
+    n_ags <- length(selected_antigens)
+    n_rows <- ceiling(length(selected_antigens) / 3)
+    plot_height <- max(600, n_rows * 320)
     
     validate(
       need(nrow(df) > 0, "No matched measurements for the selected antigens.")
@@ -1038,67 +1091,70 @@ server <- function(input, output, session) {
       format(round(df$MFI_Y - df$MFI_X, 1), big.mark = ",")
     )
     
-    p <- ggplot2::ggplot(df, aes(x = MFI_X, y = MFI_Y)) +
-      geom_abline(
-        intercept = 0, slope = 1,
-        linetype = "dashed", colour = "cornflowerblue") +
-      geom_point(aes(text = HoverLabel), size = 2.5) +
-      facet_wrap(~ Antigen, scales = "free", ncol = 3) +
-      ggplot2::labs(
-        title = paste("Plate Concordance:", input$plate_selection_x, "vs", input$plate_selection_y),
-        x = paste("MFI —", input$plate_selection_x),
-        y = paste("MFI —", input$plate_selection_y)
-      ) +
-      ggplot2::theme_minimal(base_size = 13) +
-      ggplot2::theme(
-        strip.text = ggplot2::element_text(face = "bold"),
-        plot.title = ggplot2::element_text(face = "bold"),
-        panel.grid.minor = ggplot2::element_blank(),
-        aspect.ratio = 1
-      )
+    # Keep the antigen order from the selection
+    selected_antigens <- input$concordance_antigens
+    selected_antigens <- selected_antigens[
+      selected_antigens %in% unique(df$Antigen)
+    ]
     
-    # Convert to an interactive Plotly chart
-    plotly::ggplotly(
-      p,
-      tooltip = "text"
-    ) |>
+    # Build each antigen plot separately
+    plot_list <- lapply(selected_antigens, function(antigen_name) {
+      
+      antigen_df <- df[
+        df$Antigen == antigen_name, ,
+        drop = FALSE
+      ]
+      
+      # Plot
+      p <- ggplot(antigen_df, aes(x = MFI_X, y = MFI_Y)) +
+        geom_abline(
+          intercept = 0, slope = 1,
+          linetype = "dashed", colour = "cornflowerblue") +
+        geom_point(aes(text = HoverLabel), size = 2.5) +
+        labs(
+          title = paste("Plate Concordance:", input$plate_selection_x, "vs", input$plate_selection_y),
+          x = paste(input$plate_selection_x, " MFI"),
+          y = paste(input$plate_selection_y, " MFI")
+        ) +
+        theme_minimal(base_size = 13) +
+        theme(
+          strip.text = ggplot2::element_text(face = "bold"),
+          plot.title = ggplot2::element_text(face = "bold"),
+          panel.grid.minor = ggplot2::element_blank(),
+          aspect.ratio = 1,
+          plot.margin = ggplot2::margin(8, 8, 8, 8)
+        ) +
+        facet_wrap(~ Antigen, scales = "free", ncol = 3)
+      
+      # Convert to an interactive Plotly chart
+      plotly::ggplotly(p, height = plot_height, tooltip = "text") 
+    })
+    
+    # Arrange the separate plots into three columns
+    n_rows <- ceiling(length(plot_list) / 3)
+    
+    combined_plot <- plotly::subplot(
+      plot_list,
+      nrows = n_rows,
+      shareX = FALSE, shareY = FALSE,
+      titleX = TRUE, titleY = TRUE, margin = 0.06
+    )
+    
+    # Add an overall title and responsive layout
+    combined_plot |>
       plotly::layout(
-        hovermode = "closest",
+        title = list(
+          text = paste("Plate Concordance:", input$plate_selection_x, "vs", input$plate_selection_y),
+          x = 0.5),
         autosize = TRUE,
-        margin = list(l = 60, r = 20, t = 70, b = 60)
+        margin = list(l = 65, r = 25, t = 85, b = 65)
       ) |>
       plotly::config(
         responsive = TRUE
       )
   })
   
-  # Size concordance plots like with the bead-count plots
-  output$concordance_plot_ui <- renderUI({
-    
-    req(concordance_data())
-    req(input$concordance_antigens)
-    
-    selected_antigens <- intersect(
-      input$concordance_antigens,
-      unique(concordance_data()$Antigen)
-    )
-    
-    req(length(selected_antigens) > 0)
-    
-    n_ags <- length(selected_antigens)
-    
-    # Three antigen plots per row
-    n_rows <- ceiling(length(selected_antigens) / 3)
-    
-    # Approximate square panels
-    plot_height <- max(400, n_rows * 220)
-    
-    plotlyOutput(
-      "concordance_plot",
-      height = paste0(plot_height, "px")
-    )
-  })
-  
+  # ---- Concordance stats table by antigen ----- #
   # Calculate concordance statistics separately for each antigen
   output$concordance_table <- DT::renderDataTable({
   
