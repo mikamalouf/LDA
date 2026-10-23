@@ -35,6 +35,7 @@ intro_tab_ui <- function(){
         h3(tags$u("Standard Curve")),
           tags$li("Each standard curve should be seperated by a comma and a space.", style = "font-size:100%"),
           tags$li("Please ensure that the standard curve input is in the correct capitalisation.", style = "font-size:100%"),
+          tags$li("If you have multiple standard curve controls on a plate, then only enter one set of standards at a time.", style = "font-size:100%"),
           tags$div(HTML('<span style="color:green; font-weight:bold;">Correct example format:</span> P1, P2, P3, P4, P5, P6, P7, P8'), style = "font-size:100%"),
         
         # Background samples
@@ -243,10 +244,11 @@ concordance_plots_ui <- function(){
                sidebarPanel(width=3,
                             
                             # Add level 5 header for Bead threshold
-                            h5(strong("Concordance"), style = "font-size:120%"),
+                            h5(strong("Concordance"), style = "font-size:110%"),
                             
-                            p(
-                              "Concordance is a way to view the technical variation across plates.", style = "font-size:120%"),
+                            p("Concordance is a way to view the technical variation across plates. This page will compare MFI values across two plates.", style = "font-size:100%"),
+                            
+                            hr(),
                             
                             # Plate selection (x axis)
                             selectInput(
@@ -265,7 +267,14 @@ concordance_plots_ui <- function(){
                             uiOutput("antigen_filter_ui")
                ),
                             
-               mainPanel(plotOutput("concordance_plot", height = "550px"))
+               mainPanel(
+                 h4("MFI Concordance Between Plates"),
+                 p("Each point represents a matched standard and dilution."),
+                 uiOutput("concordance_plot_ui"),
+                 hr(),
+                 h4("Concordance Statistics"),
+                 DT::dataTableOutput("concordance_table")
+               )
     ))
   }
 
@@ -789,6 +798,366 @@ server <- function(input, output, session) {
     )))
     
     sort(unique_standards)
+  })
+  
+  # ---- CONCORDANCE BETWEEN TWO PLATES ----
+  # Update the plate dropdowns when files have been uploaded
+  observe({
+    req(d())
+    plates <- d()$platenames
+    
+    updateSelectInput(
+      session, "plate_selection_x",
+      choices = plates,
+      selected = plates[1]
+    )
+    
+    updateSelectInput(
+      session, "plate_selection_y",
+      choices = plates,
+      selected = if (length(plates) >= 2) plates[2] else plates[1]
+    )
+  })
+  
+  # Antigen selector: select one or more antigens, or all antigens
+  output$antigen_filter_ui <- renderUI({
+    req(d())
+    
+    selectizeInput(
+      inputId = "concordance_antigens",
+      label = "Select antigens:",
+      choices = d()$ags,
+      selected = d()$ags,
+      multiple = TRUE,
+      options = list(plugins = list("remove_button"))
+    )
+  })
+  
+  # Prepare matched standard-control MFI measurements
+  concordance_data <- reactive({
+    
+    req(d())
+    req(input$plate_selection_x, input$plate_selection_y)
+    
+    # Read standard labels from Upload page
+    labels <- trimws(as.character(submitted_standards()))
+    labels <- unique(labels[!is.na(labels) & nzchar(labels)])
+    
+    # Message if no standards entered on Upload page
+    validate(
+      need(
+        length(labels) > 0,
+        paste(
+          "Please enter the full standard sample labels on the Upload page",
+          "and click 'Submit standard curves'."
+        )
+      )
+    )
+    
+    # Message if select same plate
+    validate(
+      need(
+        input$plate_selection_x != input$plate_selection_y,
+        "Please select two different plates."
+      )
+    )
+    
+    plates <- d()$plates
+    # Convert the selected plate values to single character strings
+    plate_x_name <- as.character(
+      unlist(input$plate_selection_x, use.names = FALSE)
+    )
+    plate_y_name <- as.character(
+      unlist(input$plate_selection_y, use.names = FALSE)
+    )
+    
+    validate(
+      need(
+        length(plate_x_name) == 1 && nzchar(plate_x_name),
+        "Please select a plate for the x-axis."
+      ),
+      need(
+        length(plate_y_name) == 1 && nzchar(plate_y_name),
+        "Please select a plate for the y-axis."
+      )
+    )
+    
+    plate_x_name <- plate_x_name[1]
+    plate_y_name <- plate_y_name[1]
+    
+    # Find the plate positions by name
+    plate_x_index <- match(plate_x_name, names(plates))
+    plate_y_index <- match(plate_y_name, names(plates))
+    
+    validate(
+      need(!is.na(plate_x_index), "The selected x-axis plate was not found."),
+      need(!is.na(plate_y_index), "The selected y-axis plate was not found."),
+      need(plate_x_name != plate_y_name, "Please select two different plates.")
+    )
+    
+    # Use numeric indices to retrieve the plate data
+    plate_x <- plates[[plate_x_index]]
+    plate_y <- plates[[plate_y_index]]
+    
+    antigens <- intersect(d()$ags, 
+                          intersect(
+                            names(plate_x),
+                            names(plate_y)
+                            ))
+    
+    validate(
+      need(length(antigens) > 0,
+           "The selected plates have no antigens in common.")
+    )
+    
+    # Normalise only letter case and leading/trailing whitespace.
+    # Keep punctuation such as "/" and ":" unchanged.
+    label_keys <- tolower(labels)
+    
+    # Extract measurements for the exact submitted sample labels
+    extract_plate <- function(pd) {
+      
+      sample_names <- trimws(as.character(pd$Sample))
+      sample_keys <- tolower(sample_names)
+      
+      keep <- !is.na(sample_keys) &
+        sample_keys %in% label_keys
+      
+      if (!any(keep)) {
+        return(NULL)
+      }
+      
+      selected <- pd[keep, , drop = FALSE]
+      selected_keys <- sample_keys[keep]
+      
+      # Convert the selected samples into one row per
+      # Sample x Antigen combination
+      long_data <- do.call(
+        rbind,
+        lapply(antigens, function(antigen) {
+          
+          data.frame(
+            SampleKey = selected_keys,
+            Antigen = antigen,
+            MFI = suppressWarnings(
+              as.numeric(as.character(selected[[antigen]]))
+            ),
+            stringsAsFactors = FALSE
+          )
+        })
+      )
+      
+      # Remove missing or non-numeric MFI values
+      long_data <- long_data[
+        is.finite(long_data$MFI),
+        ,
+        drop = FALSE
+      ]
+      
+      if (nrow(long_data) == 0) {
+        return(NULL)
+      }
+      
+      # Average replicate wells for the same sample and antigen
+      aggregate(
+        MFI ~ SampleKey + Antigen,
+        data = long_data,
+        FUN = mean
+      )
+    }
+    
+    x <- extract_plate(plate_x)
+    y <- extract_plate(plate_y)
+    
+    validate(
+      need(
+        !is.null(x) && nrow(x) > 0,
+        paste(
+          "None of the submitted sample labels matched Plate X:",
+          input$plate_selection_x
+        )
+      ),
+      need(
+        !is.null(y) && nrow(y) > 0,
+        paste(
+          "None of the submitted sample labels matched Plate Y:",
+          input$plate_selection_y
+        )
+      )
+    )
+    
+    # Rename MFI columns, then match by sample identifier and antigen
+    names(x)[names(x) == "MFI"] <- "MFI_X"
+    names(y)[names(y) == "MFI"] <- "MFI_Y"
+    
+    matched <- merge(
+      x,
+      y,
+      by = c("SampleKey", "Antigen"),
+      all = FALSE
+    )
+    
+    validate(
+      need(
+        nrow(matched) > 0,
+        paste(
+          "Samples were found on both plates, but no matching",
+          "sample and antigen pairs could be formed."
+        )
+      )
+    )
+    
+    # Display the original submitted sample label
+    matched$Sample <- labels[
+      match(matched$SampleKey, label_keys)
+    ]
+    
+    matched
+  })
+  
+  # Plot one scatterplot per antigen
+  output$concordance_plot <- plotly::renderPlotly({
+    req(concordance_data(), input$concordance_antigens)
+    
+    df <- concordance_data()
+    df <- df[df$Antigen %in% input$concordance_antigens, , drop = FALSE]
+    
+    validate(
+      need(nrow(df) > 0, "No matched measurements for the selected antigens.")
+    )
+    
+    # Create informative hover labels for every point
+    df$HoverLabel <- paste0(
+      "<b>Standard sample:</b> ", df$Sample,
+      "<br><b>Antigen:</b> ", df$Antigen,
+      "<br><b>Plate X MFI:</b> ",
+      format(round(df$MFI_X, 1), big.mark = ","),
+      "<br><b>Plate Y MFI:</b> ",
+      format(round(df$MFI_Y, 1), big.mark = ","),
+      "<br><b>Difference (Y - X):</b> ",
+      format(round(df$MFI_Y - df$MFI_X, 1), big.mark = ",")
+    )
+    
+    p <- ggplot2::ggplot(df, aes(x = MFI_X, y = MFI_Y)) +
+      geom_abline(
+        intercept = 0, slope = 1,
+        linetype = "dashed", colour = "cornflowerblue") +
+      geom_point(aes(text = HoverLabel), size = 2.5) +
+      facet_wrap(~ Antigen, scales = "free", ncol = 3) +
+      ggplot2::labs(
+        title = paste("Plate Concordance:", input$plate_selection_x, "vs", input$plate_selection_y),
+        x = paste("MFI —", input$plate_selection_x),
+        y = paste("MFI —", input$plate_selection_y)
+      ) +
+      ggplot2::theme_minimal(base_size = 13) +
+      ggplot2::theme(
+        strip.text = ggplot2::element_text(face = "bold"),
+        plot.title = ggplot2::element_text(face = "bold"),
+        panel.grid.minor = ggplot2::element_blank(),
+        aspect.ratio = 1
+      )
+    
+    # Convert to an interactive Plotly chart
+    plotly::ggplotly(
+      p,
+      tooltip = "text"
+    ) |>
+      plotly::layout(
+        hovermode = "closest",
+        autosize = TRUE,
+        margin = list(l = 60, r = 20, t = 70, b = 60)
+      ) |>
+      plotly::config(
+        responsive = TRUE
+      )
+  })
+  
+  # Size concordance plots like with the bead-count plots
+  output$concordance_plot_ui <- renderUI({
+    
+    req(concordance_data())
+    req(input$concordance_antigens)
+    
+    selected_antigens <- intersect(
+      input$concordance_antigens,
+      unique(concordance_data()$Antigen)
+    )
+    
+    req(length(selected_antigens) > 0)
+    
+    n_ags <- length(selected_antigens)
+    
+    # Three antigen plots per row
+    n_rows <- ceiling(length(selected_antigens) / 3)
+    
+    # Approximate square panels
+    plot_height <- max(400, n_rows * 220)
+    
+    plotlyOutput(
+      "concordance_plot",
+      height = paste0(plot_height, "px")
+    )
+  })
+  
+  # Calculate concordance statistics separately for each antigen
+  output$concordance_table <- DT::renderDataTable({
+  
+    req(concordance_data())
+    req(input$concordance_antigens)
+    df <- concordance_data()
+    df <- df[df$Antigen %in% input$concordance_antigens, , drop = FALSE]
+    
+    validate(
+      need(nrow(df) > 0, "No matched measurements available.")
+    )
+    
+    # Split measurements by antigen
+    antigen_groups <- split(df, as.character(df$Antigen))
+    
+    results_list <- lapply(names(antigen_groups), function(antigen_name) {
+      
+      z <- antigen_groups[[antigen_name]]
+      x <- z$MFI_X
+      y <- z$MFI_Y
+      # Remove missing or non-finite paired measurements
+      keep <- is.finite(x) & is.finite(y)
+      x <- x[keep]
+      y <- y[keep]
+      
+      n <- length(x)
+      
+      pearson_r <- if (
+        n >= 2 && stats::sd(x) > 0 && stats::sd(y) > 0
+      ) {
+        stats::cor(x, y, method = "pearson")
+      } else {
+        NA_real_
+      }
+      
+      data.frame(
+        Antigen = antigen_name,
+        # 'Matched points' = n,
+        'Pearson (r)' = pearson_r,
+        'MFI difference (Plate Y minus Plate X)' = mean(y - x),
+        check.names = FALSE,
+        stringsAsFactors = FALSE
+      )
+    })
+    
+    result <- do.call(rbind, results_list)
+    rownames(result) <- NULL
+    
+    DT::datatable(
+      result,
+      rownames = FALSE,
+      options = list(pageLength = 25, scrollX = TRUE)
+    ) |>
+      DT::formatRound(
+        columns = c(
+          "Pearson (r)", "MFI difference (Plate Y minus Plate X)"
+        ),
+        digits = 3
+      )
   })
   
   
@@ -1504,7 +1873,7 @@ server <- function(input, output, session) {
       
       n_ags <- length(bead_data()$ags)
       n_rows <- ceiling(n_ags / 2)
-      plot_height <- max(400, n_rows * 220)
+      plot_height <- max(600, n_rows * 220)
       
       plotlyOutput("bead_count_plots", height = paste0(plot_height, "px"))
     })
