@@ -214,6 +214,17 @@ bead_count_ui <- function() {
                             "Low bead counts may not ensure statistically valid results.",
                             "Please add the minimum number beads required to proceed with analysis (usually 30 or 50).", style = "font-size:120%"),
                           
+                          hr(),
+                          
+                          # Introduce the bead colour meaning
+                          p(),
+                          p(
+                            "Each dot is the beads per antigen per well. ",
+                            "A black dot represents the bead count of the antigen in the well being over the specified threshold. ",
+                            "A red dot represents the bead count of the antigen in the well being under the specified threshold.", style = "font-size:120%"),
+                          
+                          hr(),
+                          
                           # User input for bead threshold
                           numericInput(inputId = "bead_threshold",
                                        label = "Please enter a minimum bead count: ",
@@ -225,12 +236,13 @@ bead_count_ui <- function() {
                                       label = "Select Plate:",
                                       choices = NULL),
                           
-                          # Introduce the bead colour meaning
-                          p(),
-                          p(
-                            "Each dot is the beads per antigen per well. ",
-                            "A black dot represents the bead count of the antigen in the well being over the specified threshold. ",
-                            "A red dot represents the bead count of the antigen in the well being under the specified threshold.", style = "font-size:120%")
+                          hr(),
+                          
+                          h5(strong("Plates with low bead counts")),
+                          
+                          p("The following plates have at least one well with at an antigen bead count below your threshold."),
+                          
+                          uiOutput("low_bead_plates_ui")
 
              ),
              mainPanel(uiOutput("bead_count_ui_dynamic")))
@@ -1346,6 +1358,89 @@ server <- function(input, output, session) {
         selected = names(bead_data()$plates)[1]
       )
     })
+  
+    
+  # Identify plates with bead counts below the selected threshold
+    low_bead_plates <- reactive({
+      
+      req(bead_data())
+      req(input$bead_threshold)
+      
+      plates <- bead_data()$plates
+      threshold <- as.numeric(input$bead_threshold)
+      
+      low_counts <- vapply(plates, function(plate) {
+        
+        # Antigen bead-count columns start at column 3
+        if (ncol(plate) < 3) {
+          return(0L)
+        }
+        
+        bead_values <- unlist(
+          lapply(plate[, 3:ncol(plate), drop = FALSE], function(x) {
+            suppressWarnings(as.numeric(as.character(x)))
+          }),
+          use.names = FALSE
+        )
+        
+        sum(
+          !is.na(bead_values) &
+            is.finite(bead_values) &
+            bead_values < threshold
+        )
+        
+      }, integer(1))
+      
+      data.frame(
+        Plate = names(low_counts),
+        Low_bead_count_results = as.integer(low_counts),
+        stringsAsFactors = FALSE
+      )
+    })
+    
+  # Show all plates with low bead counts in the sidebar
+  output$low_bead_plates_ui <- renderUI({
+      
+    flagged <- low_bead_plates()
+    flagged_plates <- flagged[flagged$Low_bead_count_results > 0, , drop = FALSE]
+      
+      if (nrow(flagged) == 0) {
+        return(
+          p(
+            "No plates have bead counts below the current threshold.",
+            style = "color: green;"
+          )
+        )
+      }
+      
+    # Display plate names and the number of low bead-count results
+    tags$div(
+      lapply(seq_len(nrow(flagged_plates)), function(i) {
+        
+        tags$div(
+          style = paste(
+            "padding: 8px 10px;",
+            "margin-bottom: 6px;",
+            "border-left: 3px solid #dc3545;",
+            "color: red;"
+          ),
+          
+          tags$strong(
+            paste0("\u26A0 ", flagged_plates$Plate[i])
+          ),
+          
+          tags$p(
+            paste(
+              flagged_plates$Low_bead_count_results[i],
+              "bead-count result(s) below threshold"
+            ),
+            style = "margin: 4px 0 0 0; font-size: 12px;"
+          )
+        )
+      })
+    )
+  })
+    
     
   # Data preparation - Reactive for standard curve
     std_data <- reactive({
