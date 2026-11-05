@@ -302,21 +302,9 @@ std_curve_plots_ui <- function(){
                             h4(strong("Standard Verification"), style = "font-size: 110%; margin-top: 0; color: #2c3e50;"),
                             p("Active standard label from Upload page:", style = "font-size: 95%; margin-bottom: 5px;"),
                             verbatimTextOutput("verified_std_label")
-                          ),
-                          hr(),
+                          )
                           
-                          p(strong("Select plates to compare (max 5):"), style="font-size:110%"),
-                          uiOutput("std_curve_plate_selection"),
-                          hr(),
                           
-                          p(strong("Select standard series:"), style = "font-size:110%"),
-                          uiOutput("std_curve_standard_selection"),
-                          hr(),
-                          
-                          p(strong("Select antigen:"), style = "font-size:110%"),
-                          uiOutput("std_curve_antigen_selection")
-                          # p(strong("Select antigen:"), style="font-size:120%") #,
-                          # uiOutput("std_curve_antigen_selection")
              ),
              mainPanel(
                h4("Standard Curve Plot", align = "center"),
@@ -2064,9 +2052,9 @@ server <- function(input, output, session) {
         inputId = "std_curve_input",
         label = "",
         choices = d()$platenames,
-        selected = d()$platenames[1],   # ← defaults to first plate so plot renders immediately
-        multiple = TRUE,
-        options = list(maxItems = 5)
+        selected = d()$platenames,   # ← defaults to first plate so plot renders immediately
+        multiple = TRUE # ,
+        # options = list(maxItems = 5)
       )
     })
     
@@ -2113,92 +2101,72 @@ server <- function(input, output, session) {
       )
     })
     
-    output$std_curve_plot <- renderPlotly({
+    
+    # Standard curves: all plates, standards and antigens
+    output$std_curve_plot <- plotly::renderPlotly({
       
-      req(std_data(), input$std_curve_input, input$std_curve_antigen, input$std_curve_standard_choice)
+      req(std_data())
       
       mapping <- standard_mapping()
+      plates <- std_data()$plates
+      plate_names <- std_data()$platenames
       
-      selected_std <- input$std_curve_standard_choice
-      selected_plates <- input$std_curve_input
-      antigen <- input$std_curve_antigen
-      # dilutions <- normalise_dilution(user_dilutions())
+      # Identify antigen columns (starting from column 3)
+      first_plate <- plates[[plate_names[1]]]
+      antigen_cols <- names(first_plate)[3:ncol(first_plate)]
       
-      # req(length(dilutions) > 0, !anyNA(dilutions))
-      # 
-      # # Extract the denominator: 1/50 -> 50, 1/100 -> 100
-      # dilution_factor <- function(x) {
-      #   vapply(strsplit(x, "/", fixed = TRUE), function(parts) {
-      #     if (length(parts) == 2) {
-      #       as.numeric(parts[2]) / as.numeric(parts[1])
-      #     } else {
-      #       NA_real_
-      #     }
-      #   }, numeric(1))
-      # }
-      
-      # Keep only the dilution series for the selected standard
-      selected_mapping <- mapping[
-        tolower(mapping$Standard) == tolower(selected_std),
-        ,
-        drop = FALSE
-      ]
-      
-      validate(
-        need(
-          nrow(selected_mapping) > 0,
-          paste("No submitted samples found for standard:", selected_std)
-        )
-      )
-      
-      # Process each selected plate
-      df_list <- lapply(selected_plates, function(plate_name) {
+      # Extract standard samples and MFI values from every plate
+      df_list <- lapply(plate_names, function(plate_name) {
         
-        pd <- std_data()$plates[[plate_name]]
+        pd <- plates[[plate_name]]
         
         if (is.null(pd) || !"Sample" %in% names(pd)) {
           return(NULL)
         }
         
-        if (!antigen %in% names(pd)) {
-          return(NULL)
-        }
+        # Match full submitted sample labels
+        match_index <- match(
+          tolower(trimws(as.character(pd$Sample))),
+          tolower(trimws(mapping$Sample))
+        )
         
-        sample_names <- tolower(trimws(as.character(pd$Sample)))
-        submitted_names <- tolower(trimws(selected_mapping$Sample))
-        
-        # Match the full sample labels
-        match_index <- match(sample_names, submitted_names)
         keep <- !is.na(match_index)
         
         if (!any(keep)) return(NULL)
         
-        # Retrieve the corresponding dilution information
-        matched <- selected_mapping[match_index[keep], , drop = FALSE]
+        matched <- mapping[match_index[keep], , drop = FALSE]
         
-        # Retrieve well information, if available
-        well <- if ("Location" %in% names(pd)) {
-          as.character(pd$Location[keep])
-        } else {
-          rep(NA_character_, sum(keep))
-        }
+        # Extract MFI for every antigen
+        antigen_data <- lapply(antigen_cols, function(antigen) {
+          
+          if (!antigen %in% names(pd)) return(NULL)
+          
+          data.frame(
+            Plate = plate_name,
+            Standard = matched$Standard,
+            Sample = as.character(pd$Sample[keep]),
+            Dilution = matched$Dilution,
+            DilutionFactor = matched$DilutionFactor,
+            DilutionOrder = matched$DilutionOrder,
+            Antigen = antigen,
+            MFI = suppressWarnings(
+              as.numeric(as.character(pd[[antigen]][keep]))
+            ),
+            stringsAsFactors = FALSE
+          )
+        })
         
-        data.frame(
-          Plate = plate_name,
-          Well = well,
-          Sample = as.character(pd$Sample[keep]),
-          Standard = matched$Standard,
-          Dilution = matched$Dilution,
-          DilutionFactor = matched$DilutionFactor,
-          DilutionOrder = matched$DilutionOrder,
-          MFI = suppressWarnings(
-            as.numeric(as.character(pd[[antigen]][keep]))
-          ),
-          stringsAsFactors = FALSE
+        antigen_data <- Filter(
+          function(x) !is.null(x),
+          antigen_data
         )
+        
+        if (length(antigen_data) == 0) return(NULL)
+        
+        do.call(rbind, antigen_data)
       })
       
-      # Remove plates without matching samples
+      # Remove plates without matching standard samples
       df_list <- Filter(
         function(x) !is.null(x) && nrow(x) > 0,
         df_list
@@ -2207,18 +2175,14 @@ server <- function(input, output, session) {
       validate(
         need(
           length(df_list) > 0,
-          paste(
-            "No matching standard samples found for",
-            selected_std,
-            "on the selected plates."
-          )
+          "No submitted standard samples matched the uploaded plates."
         )
       )
       
-      # Combine the selected plates
+      # Combine all plates
       df <- do.call(rbind, df_list)
       
-      # Keep only valid, positive MFI and dilution values
+      # Keep valid positive MFI and dilution values
       df <- df[
         is.finite(df$MFI) &
           df$MFI > 0 &
@@ -2235,193 +2199,98 @@ server <- function(input, output, session) {
         )
       )
       
-      # Log-transform dilution and MFI
-      df$LogDilution <- log10(df$DilutionFactor)
+      # Log-transform MFI
       df$LogMFI <- log10(df$MFI)
       
-      # Keep the dilution order entered by the user
-      df <- df[
-        order(df$Plate, df$DilutionOrder),
+      # Prepare dilution labels for the x-axis
+      axis_data <- unique(
+        df[, c("DilutionFactor", "Dilution")]
+      )
+      
+      axis_data <- axis_data[
+        order(axis_data$DilutionFactor),
         ,
         drop = FALSE
       ]
       
-      axis_data <- selected_mapping[
-        order(selected_mapping$DilutionOrder),
-        ,
-        drop = FALSE
-      ]
-      
-      # Create the standard curve
+      # Create plots for all antigens
       p <- ggplot(
         df,
         aes(
-          x = LogDilution,
+          x = log10(DilutionFactor),
           y = LogMFI,
           colour = Plate,
           group = Plate,
+          # shape = Standard,
           text = paste0(
             "<b>Plate:</b> ", Plate,
-            "<br><b>Well:</b> ", Well,
-            "<br><b>Sample:</b> ", Sample,
             "<br><b>Standard:</b> ", Standard,
+            "<br><b>Sample:</b> ", Sample,
             "<br><b>Dilution:</b> ", Dilution,
-            "<br><b>Antigen:</b> ", antigen,
+            "<br><b>Antigen:</b> ", Antigen,
             "<br><b>MFI:</b> ", round(MFI, 1)
           )
         )
       ) +
-        geom_line(linewidth = 1) +
-        geom_point(size = 2.5) +
+        geom_point(size = 2.5, alpha = 0.8) +
+        geom_line() +
+        facet_wrap(
+          ~ Antigen,
+          scales = "free",
+          ncol = 3,
+          
+        ) +
         scale_x_continuous(
           breaks = log10(axis_data$DilutionFactor),
           labels = axis_data$Dilution
         ) +
         labs(
-          title = paste(
-            "Standard Curve -", selected_std, "-", antigen
-          ),
+          title = "Standard Curves",
           x = "Dilution",
           y = "Log10 MFI",
-          colour = "Plate"
+          colour = "Plate",
+          shape = "Standard"
         ) +
-        theme_minimal(base_size = 13) +
+        theme_minimal(base_size = 12) +
         theme(
-          axis.text.x = element_text(angle = 35, hjust = 1)
+          axis.text.x = element_text(angle = 35, hjust = 1),
+          strip.text = element_text(face = "bold"),
+          legend.position = "bottom",
+          panel.spacing = unit(0.5, "lines"),
+          legend.box.margin = margin(t = -10),
+          legend.margin = margin(t = -5),
+          plot.margin = margin(
+            t = 5,
+            r = 5,
+            b = 0,
+            l = 5
+          )
         )
       
-      # Make the plot interactive
+      plot_height <- max(
+        600,
+        ceiling(length(unique(df$Antigen)) / 3) * 280
+      )
+      
       plotly::ggplotly(
         p,
         tooltip = "text",
-        height = 550
-      )
+        height = plot_height) %>%
+        plotly::layout(
+          legend = list(
+            orientation = "h",
+            x = 0.5,
+            xanchor = "center",
+            y = 0,
+            yanchor = "bottom"
+          ),
+          margin = list(
+            t = 40,
+            b = 60
+          )
+        )
+      
     })
-        
-    #     # Identify standards using the user's dilution list
-    #     identified <- identify.standards(pd, dilutions)
-    #     
-    #       print(data.frame(
-    #         Sample = pd$Sample,
-    #         Standard = identified$Standard,
-    #         Dilution = identified$Dilution,
-    #         Candidate = identified$IsStandardCandidate
-    #       ))
-    #       
-    #       print(paste("Selected standard:", selected_std))
-    #       print(paste("Entered dilutions:", paste(dilutions, collapse = ", ")))
-    #     
-    #     # Keep ONLY the selected standard and requested dilutions
-    #       print(unique(identified$Standard))
-    #       print(unique(identified$Dilution))
-    #       print(selected_std)
-    #       
-    #       keep <- !is.na(identified$Standard) &
-    #         tolower(trimws(identified$Standard)) ==
-    #         tolower(trimws(selected_std)) &
-    #         identified$Dilution %in% dilutions
-    #       
-    #       print(table(keep, useNA = "ifany"))
-    #     
-    #     if (!any(keep)) {
-    #       return(NULL)
-    #     }
-    #     
-    #     matched_dilutions <- identified$Dilution[keep]
-    #     
-    #     data.frame(
-    #       Plate = plate_name,
-    #       Sample = as.character(pd$Sample[keep]),
-    #       Standard = identified$Standard[keep],
-    #       Dilution = matched_dilutions,
-    #       DilutionNumeric = dilution_factor(matched_dilutions),
-    #       MFI = suppressWarnings(
-    #         as.numeric(as.character(pd[[antigen]][keep]))
-    #       ),
-    #       stringsAsFactors = FALSE
-    #     )
-    #   })
-    #   
-    #   # Remove plates without matching samples
-    #   df_list <- Filter(
-    #     function(x) !is.null(x) && nrow(x) > 0,
-    #     df_list
-    #   )
-    #   
-    #   validate(need(
-    #     length(df_list) > 0,
-    #     paste0(
-    #       "No samples matched standard '", selected_std,
-    #       "' and the entered dilutions: ",
-    #       paste(dilutions, collapse = ", ")
-    #     )
-    #   ))
-    #   
-    #   df <- do.call(rbind, df_list)
-    #   
-    #   # Retain valid positive measurements and dilution factors
-    #   df <- df[
-    #     !is.na(df$MFI) &
-    #       is.finite(df$MFI) &
-    #       df$MFI > 0 &
-    #       !is.na(df$DilutionNumeric) &
-    #       is.finite(df$DilutionNumeric) &
-    #       df$DilutionNumeric > 0,
-    #     ,
-    #     drop = FALSE
-    #   ]
-    #   
-    #   validate(need(
-    #     nrow(df) > 0,
-    #     "No valid positive MFI and dilution values are available to plot."
-    #   ))
-    #   
-    #   # Order points according to the user's entered dilutions
-    #   df$DilutionOrder <- match(df$Dilution, dilutions)
-    #   
-    #   df <- df[
-    #     order(df$Plate, df$DilutionOrder),
-    #     ,
-    #     drop = FALSE
-    #   ]
-    #   
-    #   df$LogDilution <- log10(df$DilutionNumeric)
-    #   df$LogMFI <- log10(df$MFI)
-    #   
-    #   p <- ggplot(
-    #     df,
-    #     aes(
-    #       x = LogDilution,
-    #       y = LogMFI,
-    #       color = Plate,
-    #       group = Plate,
-    #       text = paste0(
-    #         "Plate: ", Plate,
-    #         "<br>Sample: ", Sample,
-    #         "<br>Standard: ", Standard,
-    #         "<br>Dilution: ", Dilution,
-    #         "<br>MFI: ", round(MFI, 1)
-    #       )
-    #     )
-    #   ) +
-    #     geom_line(linewidth = 1) +
-    #     geom_point(size = 2.5) +
-    #     labs(
-    #       title = paste(
-    #         "Standard Curve -", selected_std, "-", antigen
-    #       ),
-    #       x = "Log10 Dilution Factor",
-    #       y = "Log10 MFI",
-    #       color = "Plate"
-    #     ) +
-    #     theme_minimal(base_size = 13) +
-    #     theme(
-    #       axis.text.x = element_text(angle = 35, hjust = 1)
-    #     )
-    #   
-    #   ggplotly(p, tooltip = "text", height = 550)
-    # })
-          
 
     # QC
     ## Levey-Jennings controls for tracking high, mid, and low dilution points across plates
