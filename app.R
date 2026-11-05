@@ -871,7 +871,7 @@ server <- function(input, output, session) {
         matched <- !is.na(standard_index)
         
         df$Dilution[matched] <- mapping$Dilution[standard_index[matched]]
-        df$DilutionOrder[matched] <- mapping$Order[standard_index[matched]]
+        df$DilutionOrder[matched] <- mapping$DilutionOrder[standard_index[matched]]
         
         # Identify control and background samples
         get_pattern <- function(input_val, default = "___NONE___") {
@@ -1644,22 +1644,25 @@ server <- function(input, output, session) {
     
     # Reactive expression to find all unique matching standard patterns in the uploaded plates
     available_standards <- reactive({
-      req(std_data())
+      req(standard_mapping())
       
-      identified <- identify.standards(
-        data = std_data()$plates,
-        dilutions = user_dilutions()
-      )
-      
-      standards <- unique(
-        identified$Standard[
-          identified$IsStandardCandidate &
-            !is.na(identified$Standard) &
-            identified$Standard != ""
-        ]
-      )
-      
-      sort(standards)
+      unique(standard_mapping()$Standard)
+      # req(std_data())
+      # 
+      # identified <- identify.standards(
+      #   data = std_data()$plates,
+      #   dilutions = user_dilutions()
+      # )
+      # 
+      # standards <- unique(
+      #   identified$Standard[
+      #     identified$IsStandardCandidate &
+      #       !is.na(identified$Standard) &
+      #       identified$Standard != ""
+      #   ]
+      # )
+      # 
+      # sort(standards)
     })
       
   
@@ -1834,80 +1837,156 @@ server <- function(input, output, session) {
     # Standard Curves
     output$std_table <- DT::renderDataTable({
       
-      req(std_data())
-      req(user_dilutions())
+      req(std_data(), user_dilutions())
       
+      mapping <- standard_mapping()
       plates <- std_data()$plates
-      dilutions <- user_dilutions()
+      antigen <- input$std_curve_antigen
+      # dilutions <- user_dilutions()
       
-      # Get the standard names submitted on the Upload page
-      labels <- submitted_standards()
+      # # Get the standard names submitted on the Upload page
+      # labels <- submitted_standards()
       
-      # Identify matching standards on every plate
       standard_tables <- lapply(names(plates), function(plate_name) {
         
-        plate_data <- plates[[plate_name]]
+        pd <- plates[[plate_name]]
         
-        identified <- identify.standards(
-          plate_data,
-          dilutions
-        )
-        
-        # Retain only identified standard samples
-        keep <- identified$IsStandardCandidate &
-          !is.na(identified$Standard)
-        
-        # Restrict to submitted standard names
-        if (length(labels) > 0) {
-          keep <- keep &
-            tolower(identified$Standard) %in% tolower(labels)
-        }
-        
-        if (!any(keep)) {
+        if (is.null(pd) ||
+            !"Sample" %in% names(pd) ||
+            !antigen %in% names(pd)) {
           return(NULL)
         }
         
-        result <- plate_data[keep, , drop = FALSE]
+        sample_names <- tolower(trimws(as.character(pd$Sample)))
+        submitted_names <- tolower(trimws(mapping$Sample))
         
-        result$Plate <- plate_name
-        result$Standard <- identified$Standard[keep]
-        result$MatchedDilution <- identified$Dilution[keep]
+        match_index <- match(sample_names, submitted_names)
+        keep <- !is.na(match_index)
         
-        result$DilutionOrder <- match(
-          result$MatchedDilution,
-          normalise_dilution(dilutions)
+        if (!any(keep)) return(NULL)
+        
+        matched <- mapping[match_index[keep], , drop = FALSE]
+        
+        well <- if ("Location" %in% names(pd)) {
+          as.character(pd$Location[keep])
+        } else {
+          rep(NA_character_, sum(keep))
+        }
+        
+        result <- data.frame(
+          Plate = plate_name,
+          Well = well,
+          Sample = as.character(pd$Sample[keep]),
+          Dilution = matched$Dilution,
+          DilutionFactor = matched$DilutionFactor,
+          DilutionOrder = matched$DilutionOrder,
+          Antigen = antigen,
+          MFI = suppressWarnings(
+            as.numeric(as.character(pd[[antigen]][keep]))
+          ),
+          stringsAsFactors = FALSE
         )
-        
-        result <- result[
-          order(result$Standard, result$DilutionOrder),
-          ,
-          drop = FALSE
-        ]
         
         result
       })
       
-      # Remove plates without matching standards
       standard_tables <- Filter(
-        Negate(is.null),
+        function(x) !is.null(x) && nrow(x) > 0,
         standard_tables
       )
       
-      validate(need(
-        length(standard_tables) > 0,
-        "No standard-curve samples matched your submitted standard names and dilutions."
-      ))
+      validate(
+        need(
+          length(standard_tables) > 0,
+          "No submitted standard sample labels matched the uploaded plates."
+        )
+      )
       
-      # Combine matching samples across all plates
       combined <- do.call(rbind, standard_tables)
+      
+      combined <- combined[
+        order(combined$Plate, combined$DilutionOrder),
+        ,
+        drop = FALSE
+      ]
+      
       rownames(combined) <- NULL
       
       DT::datatable(
         combined,
-        options = list(pageLength = 25, scrollX = TRUE),
+        options = list(
+          pageLength = 25,
+          scrollX = TRUE
+        ),
         rownames = FALSE
       )
     })
+      
+    #   # Identify matching standards on every plate
+    #   standard_tables <- lapply(names(plates), function(plate_name) {
+    #     
+    #     plate_data <- plates[[plate_name]]
+    #     
+    #     identified <- identify.standards(
+    #       plate_data,
+    #       dilutions
+    #     )
+    #     
+    #     # Retain only identified standard samples
+    #     keep <- identified$IsStandardCandidate &
+    #       !is.na(identified$Standard)
+    #     
+    #     # Restrict to submitted standard names
+    #     if (length(labels) > 0) {
+    #       keep <- keep &
+    #         tolower(identified$Standard) %in% tolower(labels)
+    #     }
+    #     
+    #     if (!any(keep)) {
+    #       return(NULL)
+    #     }
+    #     
+    #     result <- plate_data[keep, , drop = FALSE]
+    #     
+    #     result$Plate <- plate_name
+    #     result$Standard <- identified$Standard[keep]
+    #     result$MatchedDilution <- identified$Dilution[keep]
+    #     
+    #     result$DilutionOrder <- match(
+    #       result$MatchedDilution,
+    #       normalise_dilution(dilutions)
+    #     )
+    #     
+    #     result <- result[
+    #       order(result$Standard, result$DilutionOrder),
+    #       ,
+    #       drop = FALSE
+    #     ]
+    #     
+    #     result
+    #   })
+    #   
+    #   # Remove plates without matching standards
+    #   standard_tables <- Filter(
+    #     Negate(is.null),
+    #     standard_tables
+    #   )
+    #   
+    #   validate(need(
+    #     length(standard_tables) > 0,
+    #     "No standard-curve samples matched your submitted standard names and dilutions."
+    #   ))
+    #   
+    #   # Combine matching samples across all plates
+    #   combined <- do.call(rbind, standard_tables)
+    #   rownames(combined) <- NULL
+    #   
+    #   DT::datatable(
+    #     combined,
+    #     options = list(pageLength = 25, scrollX = TRUE),
+    #     rownames = FALSE
+    #   )
+    # })
     
     # submitted_standards <- reactiveVal(character(0))
     # 
@@ -2036,28 +2115,41 @@ server <- function(input, output, session) {
     
     output$std_curve_plot <- renderPlotly({
       
-      req(std_data())
-      req(input$std_curve_input)
-      req(input$std_curve_antigen)
-      req(input$std_curve_standard_choice)
+      req(std_data(), input$std_curve_input, input$std_curve_antigen, input$std_curve_standard_choice)
+      
+      mapping <- standard_mapping()
       
       selected_std <- input$std_curve_standard_choice
       selected_plates <- input$std_curve_input
       antigen <- input$std_curve_antigen
-      dilutions <- normalise_dilution(user_dilutions())
+      # dilutions <- normalise_dilution(user_dilutions())
       
-      req(length(dilutions) > 0, !anyNA(dilutions))
+      # req(length(dilutions) > 0, !anyNA(dilutions))
+      # 
+      # # Extract the denominator: 1/50 -> 50, 1/100 -> 100
+      # dilution_factor <- function(x) {
+      #   vapply(strsplit(x, "/", fixed = TRUE), function(parts) {
+      #     if (length(parts) == 2) {
+      #       as.numeric(parts[2]) / as.numeric(parts[1])
+      #     } else {
+      #       NA_real_
+      #     }
+      #   }, numeric(1))
+      # }
       
-      # Extract the denominator: 1/50 -> 50, 1/100 -> 100
-      dilution_factor <- function(x) {
-        vapply(strsplit(x, "/", fixed = TRUE), function(parts) {
-          if (length(parts) == 2) {
-            as.numeric(parts[2]) / as.numeric(parts[1])
-          } else {
-            NA_real_
-          }
-        }, numeric(1))
-      }
+      # Keep only the dilution series for the selected standard
+      selected_mapping <- mapping[
+        tolower(mapping$Standard) == tolower(selected_std),
+        ,
+        drop = FALSE
+      ]
+      
+      validate(
+        need(
+          nrow(selected_mapping) > 0,
+          paste("No submitted samples found for standard:", selected_std)
+        )
+      )
       
       # Process each selected plate
       df_list <- lapply(selected_plates, function(plate_name) {
@@ -2072,43 +2164,33 @@ server <- function(input, output, session) {
           return(NULL)
         }
         
-        # Identify standards using the user's dilution list
-        identified <- identify.standards(pd, dilutions)
+        sample_names <- tolower(trimws(as.character(pd$Sample)))
+        submitted_names <- tolower(trimws(selected_mapping$Sample))
         
-          print(data.frame(
-            Sample = pd$Sample,
-            Standard = identified$Standard,
-            Dilution = identified$Dilution,
-            Candidate = identified$IsStandardCandidate
-          ))
-          
-          print(paste("Selected standard:", selected_std))
-          print(paste("Entered dilutions:", paste(dilutions, collapse = ", ")))
+        # Match the full sample labels
+        match_index <- match(sample_names, submitted_names)
+        keep <- !is.na(match_index)
         
-        # Keep ONLY the selected standard and requested dilutions
-          print(unique(identified$Standard))
-          print(unique(identified$Dilution))
-          print(selected_std)
-          
-          keep <- !is.na(identified$Standard) &
-            tolower(trimws(identified$Standard)) ==
-            tolower(trimws(selected_std)) &
-            identified$Dilution %in% dilutions
-          
-          print(table(keep, useNA = "ifany"))
+        if (!any(keep)) return(NULL)
         
-        if (!any(keep)) {
-          return(NULL)
+        # Retrieve the corresponding dilution information
+        matched <- selected_mapping[match_index[keep], , drop = FALSE]
+        
+        # Retrieve well information, if available
+        well <- if ("Location" %in% names(pd)) {
+          as.character(pd$Location[keep])
+        } else {
+          rep(NA_character_, sum(keep))
         }
-        
-        matched_dilutions <- identified$Dilution[keep]
         
         data.frame(
           Plate = plate_name,
+          Well = well,
           Sample = as.character(pd$Sample[keep]),
-          Standard = identified$Standard[keep],
-          Dilution = matched_dilutions,
-          DilutionNumeric = dilution_factor(matched_dilutions),
+          Standard = matched$Standard,
+          Dilution = matched$Dilution,
+          DilutionFactor = matched$DilutionFactor,
+          DilutionOrder = matched$DilutionOrder,
           MFI = suppressWarnings(
             as.numeric(as.character(pd[[antigen]][keep]))
           ),
@@ -2122,79 +2204,223 @@ server <- function(input, output, session) {
         df_list
       )
       
-      validate(need(
-        length(df_list) > 0,
-        paste0(
-          "No samples matched standard '", selected_std,
-          "' and the entered dilutions: ",
-          paste(dilutions, collapse = ", ")
+      validate(
+        need(
+          length(df_list) > 0,
+          paste(
+            "No matching standard samples found for",
+            selected_std,
+            "on the selected plates."
+          )
         )
-      ))
+      )
       
+      # Combine the selected plates
       df <- do.call(rbind, df_list)
       
-      # Retain valid positive measurements and dilution factors
+      # Keep only valid, positive MFI and dilution values
       df <- df[
-        !is.na(df$MFI) &
-          is.finite(df$MFI) &
+        is.finite(df$MFI) &
           df$MFI > 0 &
-          !is.na(df$DilutionNumeric) &
-          is.finite(df$DilutionNumeric) &
-          df$DilutionNumeric > 0,
+          is.finite(df$DilutionFactor) &
+          df$DilutionFactor > 0,
         ,
         drop = FALSE
       ]
       
-      validate(need(
-        nrow(df) > 0,
-        "No valid positive MFI and dilution values are available to plot."
-      ))
+      validate(
+        need(
+          nrow(df) > 0,
+          "No valid positive MFI measurements were found."
+        )
+      )
       
-      # Order points according to the user's entered dilutions
-      df$DilutionOrder <- match(df$Dilution, dilutions)
+      # Log-transform dilution and MFI
+      df$LogDilution <- log10(df$DilutionFactor)
+      df$LogMFI <- log10(df$MFI)
       
+      # Keep the dilution order entered by the user
       df <- df[
         order(df$Plate, df$DilutionOrder),
         ,
         drop = FALSE
       ]
       
-      df$LogDilution <- log10(df$DilutionNumeric)
-      df$LogMFI <- log10(df$MFI)
+      axis_data <- selected_mapping[
+        order(selected_mapping$DilutionOrder),
+        ,
+        drop = FALSE
+      ]
       
+      # Create the standard curve
       p <- ggplot(
         df,
         aes(
           x = LogDilution,
           y = LogMFI,
-          color = Plate,
+          colour = Plate,
           group = Plate,
           text = paste0(
-            "Plate: ", Plate,
-            "<br>Sample: ", Sample,
-            "<br>Standard: ", Standard,
-            "<br>Dilution: ", Dilution,
-            "<br>MFI: ", round(MFI, 1)
+            "<b>Plate:</b> ", Plate,
+            "<br><b>Well:</b> ", Well,
+            "<br><b>Sample:</b> ", Sample,
+            "<br><b>Standard:</b> ", Standard,
+            "<br><b>Dilution:</b> ", Dilution,
+            "<br><b>Antigen:</b> ", antigen,
+            "<br><b>MFI:</b> ", round(MFI, 1)
           )
         )
       ) +
         geom_line(linewidth = 1) +
         geom_point(size = 2.5) +
+        scale_x_continuous(
+          breaks = log10(axis_data$DilutionFactor),
+          labels = axis_data$Dilution
+        ) +
         labs(
           title = paste(
             "Standard Curve -", selected_std, "-", antigen
           ),
-          x = "Log10 Dilution Factor",
+          x = "Dilution",
           y = "Log10 MFI",
-          color = "Plate"
+          colour = "Plate"
         ) +
         theme_minimal(base_size = 13) +
         theme(
           axis.text.x = element_text(angle = 35, hjust = 1)
         )
       
-      ggplotly(p, tooltip = "text", height = 550)
+      # Make the plot interactive
+      plotly::ggplotly(
+        p,
+        tooltip = "text",
+        height = 550
+      )
     })
+        
+    #     # Identify standards using the user's dilution list
+    #     identified <- identify.standards(pd, dilutions)
+    #     
+    #       print(data.frame(
+    #         Sample = pd$Sample,
+    #         Standard = identified$Standard,
+    #         Dilution = identified$Dilution,
+    #         Candidate = identified$IsStandardCandidate
+    #       ))
+    #       
+    #       print(paste("Selected standard:", selected_std))
+    #       print(paste("Entered dilutions:", paste(dilutions, collapse = ", ")))
+    #     
+    #     # Keep ONLY the selected standard and requested dilutions
+    #       print(unique(identified$Standard))
+    #       print(unique(identified$Dilution))
+    #       print(selected_std)
+    #       
+    #       keep <- !is.na(identified$Standard) &
+    #         tolower(trimws(identified$Standard)) ==
+    #         tolower(trimws(selected_std)) &
+    #         identified$Dilution %in% dilutions
+    #       
+    #       print(table(keep, useNA = "ifany"))
+    #     
+    #     if (!any(keep)) {
+    #       return(NULL)
+    #     }
+    #     
+    #     matched_dilutions <- identified$Dilution[keep]
+    #     
+    #     data.frame(
+    #       Plate = plate_name,
+    #       Sample = as.character(pd$Sample[keep]),
+    #       Standard = identified$Standard[keep],
+    #       Dilution = matched_dilutions,
+    #       DilutionNumeric = dilution_factor(matched_dilutions),
+    #       MFI = suppressWarnings(
+    #         as.numeric(as.character(pd[[antigen]][keep]))
+    #       ),
+    #       stringsAsFactors = FALSE
+    #     )
+    #   })
+    #   
+    #   # Remove plates without matching samples
+    #   df_list <- Filter(
+    #     function(x) !is.null(x) && nrow(x) > 0,
+    #     df_list
+    #   )
+    #   
+    #   validate(need(
+    #     length(df_list) > 0,
+    #     paste0(
+    #       "No samples matched standard '", selected_std,
+    #       "' and the entered dilutions: ",
+    #       paste(dilutions, collapse = ", ")
+    #     )
+    #   ))
+    #   
+    #   df <- do.call(rbind, df_list)
+    #   
+    #   # Retain valid positive measurements and dilution factors
+    #   df <- df[
+    #     !is.na(df$MFI) &
+    #       is.finite(df$MFI) &
+    #       df$MFI > 0 &
+    #       !is.na(df$DilutionNumeric) &
+    #       is.finite(df$DilutionNumeric) &
+    #       df$DilutionNumeric > 0,
+    #     ,
+    #     drop = FALSE
+    #   ]
+    #   
+    #   validate(need(
+    #     nrow(df) > 0,
+    #     "No valid positive MFI and dilution values are available to plot."
+    #   ))
+    #   
+    #   # Order points according to the user's entered dilutions
+    #   df$DilutionOrder <- match(df$Dilution, dilutions)
+    #   
+    #   df <- df[
+    #     order(df$Plate, df$DilutionOrder),
+    #     ,
+    #     drop = FALSE
+    #   ]
+    #   
+    #   df$LogDilution <- log10(df$DilutionNumeric)
+    #   df$LogMFI <- log10(df$MFI)
+    #   
+    #   p <- ggplot(
+    #     df,
+    #     aes(
+    #       x = LogDilution,
+    #       y = LogMFI,
+    #       color = Plate,
+    #       group = Plate,
+    #       text = paste0(
+    #         "Plate: ", Plate,
+    #         "<br>Sample: ", Sample,
+    #         "<br>Standard: ", Standard,
+    #         "<br>Dilution: ", Dilution,
+    #         "<br>MFI: ", round(MFI, 1)
+    #       )
+    #     )
+    #   ) +
+    #     geom_line(linewidth = 1) +
+    #     geom_point(size = 2.5) +
+    #     labs(
+    #       title = paste(
+    #         "Standard Curve -", selected_std, "-", antigen
+    #       ),
+    #       x = "Log10 Dilution Factor",
+    #       y = "Log10 MFI",
+    #       color = "Plate"
+    #     ) +
+    #     theme_minimal(base_size = 13) +
+    #     theme(
+    #       axis.text.x = element_text(angle = 35, hjust = 1)
+    #     )
+    #   
+    #   ggplotly(p, tooltip = "text", height = 550)
+    # })
           
 
     # QC
