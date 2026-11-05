@@ -167,7 +167,7 @@ upload_tab_ui <- function() {
               hr(),
               h4("Plate Layout Verification", style = "font-size: 24px", align = "left"),
               # Plot output with the fixed height
-              plotOutput("plate_layout_map", height = "700px")
+              plotlyOutput("plate_layout_map", height = "700px")
             )
           ),
           
@@ -188,11 +188,11 @@ upload_tab_ui <- function() {
               fluidRow(
                 column(6, tableOutput("plate_table")),
                 column(6, tableOutput("antigen_table"))
-              ),
-              hr(),
-              h4("Sample Names and Standard Detection"),
-              p("Review the detected standard names and dilution values."),
-              DT::dataTableOutput("sample_names_table")
+              ) # ,
+              # hr(),
+              # h4("Sample Names and Standard Detection"),
+              # p("Review the detected standard names and dilution values."),
+              # DT::dataTableOutput("sample_names_table")
             )
           )
         )
@@ -571,6 +571,107 @@ server <- function(input, output, session) {
   # Set up standard curves
     output$std_labels <- renderText({paste("Please manually list standard curve values here. Each value should be seperated with a comma.")})
     
+    # Keep the labels in the order entered
+    submitted_standards <- reactiveVal(character(0))
+    
+    observeEvent(input$std_labelButton, {
+      
+      labels <- parse_dilution_string(input$std_labelInput)
+      labels <- trimws(labels)
+      labels <- labels[nzchar(labels)]
+      
+      validate(
+        need(length(labels) > 0, "Please enter your standard sample labels.")
+      )
+      
+      submitted_standards(labels)
+      
+      output$std_labels <- renderText({
+        paste(
+          "The standard samples are set to:",
+          paste(labels, collapse = ", ")
+        )
+      })
+    })
+    
+    # Retain the submitted text for the Standard Curve verification display
+    submitted_std_label <- eventReactive(input$std_labelButton, {
+      req(input$std_labelInput)
+      input$std_labelInput}, ignoreNULL = FALSE)
+    
+    output$verified_std_label <- renderText({
+      
+      labels <- submitted_standards()
+      
+      if (length(labels) == 0) {
+        "Warning: No standard labels submitted yet."
+      } else {
+        paste0(
+          "Active standards: ",
+          paste(labels, collapse = ", ")
+        )
+      }
+    })
+    
+    
+    # Pair each submitted standard sample with its dilution
+    standard_mapping <- reactive({
+      
+      labels <- submitted_standards()
+      dilutions <- normalise_dilution(user_dilutions()) # dilutions <- trimws(as.character(user_dilutions()))
+      
+      # # Standardise dilution formatting
+      # dilutions <- gsub(":", "/", dilutions, fixed = TRUE)
+      # dilutions <- gsub("\\s+", "", dilutions)
+      
+      req(length(labels) > 0, length(dilutions) > 0)
+      
+      validate(
+        need(
+          length(labels) == length(dilutions),
+          paste(
+            "You entered", length(labels), "standard labels but",
+            length(dilutions), "dilutions.",
+            "Please enter the same number of each, in the same order."
+          )
+        )
+      )
+      
+      dilution_parts <- strsplit(dilutions, "/", fixed = TRUE)
+      dilution_factor <- vapply(dilution_parts, function(x) {
+        as.numeric(x[2]) / as.numeric(x[1])
+      }, numeric(1))
+      
+      standard_names <- sub(
+        "[_[:space:]:-]*[0-9]+/[0-9]+$",
+        "",
+        labels
+      )
+      
+      # # Extract the dilution denominator
+      # dilution_factor <- as.numeric(
+      #   sub("^[0-9]+/", "", dilutions)
+      # )
+      # 
+      # validate(
+      #   need(
+      #     all(is.finite(dilution_factor) & dilution_factor > 0),
+      #     "Please enter dilutions in the format 1/50, 1/100, etc."
+      #   )
+      # )
+      
+      data.frame(
+        Sample = labels,
+        Standard = standard_names,
+        Dilution = dilutions,
+        DilutionFactor = dilution_factor,
+        # Order = seq_along(labels),
+        DilutionOrder = seq_along(labels),
+        stringsAsFactors = FALSE
+      )
+    })
+    
+    
     std_labels <- reactive({
       parse_dilution_string(input$std_labelInput)
     })
@@ -749,39 +850,102 @@ server <- function(input, output, session) {
         # This regex handles formats like "1(1,A1)" or "1(1,P24)"
         # It captures the letter (A-P) and all following digits (96 and 384 well)
         df$Well_ID <- sub(".*,([A-P][0-9]+)\\).*", "\\1", df$Location)
-        df$Row_ID  <- substr(df$Well_ID, 1, 1)
-        df$Col_ID  <- as.numeric(gsub("[A-P]", "", df$Well_ID))
+        df$Row_ID <- substr(df$Well_ID, 1, 1)
+        df$Col_ID <- as.numeric(gsub("[A-P]", "", df$Well_ID))
         
         ## Remove NA row
-        df <- df[!is.na(df$Row_ID) & df$Row_ID != "" & !is.na(df$Col_ID), ]
+        df <- df[!is.na(df$Row_ID) & df$Row_ID != "" & !is.na(df$Col_ID), ,drop = FALSE]
         
-        # 3. Create Search Patterns from UI Inputs
-        # Helper to handle empty inputs or comma-separated lists
+        # Match full sample labels to the standard mapping
+        mapping <- standard_mapping()
+        
+        sample_names <- tolower(trimws(as.character(df$Sample)))
+        standard_names <- tolower(trimws(mapping$Sample))
+        
+        standard_index <- match(sample_names, standard_names)
+        
+        # Assign the dilution to the matched well
+        df$Dilution <- NA_character_
+        df$DilutionOrder <- NA_integer_
+        
+        matched <- !is.na(standard_index)
+        
+        df$Dilution[matched] <- mapping$Dilution[standard_index[matched]]
+        df$DilutionOrder[matched] <- mapping$Order[standard_index[matched]]
+        
+        # Identify control and background samples
         get_pattern <- function(input_val, default = "___NONE___") {
-          if (is.null(input_val) || input_val == "") return(default)
-          # Split by comma, trim whitespace, and create an OR regex (e.g. "pos|control")
-          vals <- trimws(strsplit(input_val, ",")[[1]])
+          
+          if (is.null(input_val) || input_val == "") {
+            return(default)
+          }
+          
+          vals <- trimws(strsplit(input_val, ",", fixed = TRUE)[[1]])
+          
           paste0("(?i)(", paste(vals, collapse = "|"), ")")
         }
         
-        std_pattern  <- get_pattern(input$std_labelInput)
         ctrl_pattern <- get_pattern(input$control_labelInput)
-        # Default background includes "blank" or "background" even if input is empty
-        bkg_pattern  <- get_pattern(input$bkg_labelInput, default = "(?i)(blank|background)")
         
-        # 4. Identify Well Types
-        # We use the 'Sample' column (usually column 2)
-        sample_names <- df$Sample # Or df[[2]] if the column name varies
+        bkg_pattern <- get_pattern(
+          input$bkg_labelInput,
+          default = "(?i)(blank|background)"
+        )
         
         df$Well_Type <- dplyr::case_when(
-          grepl(std_pattern,  sample_names) ~ "Standard",
-          grepl(ctrl_pattern, sample_names) ~ "Control",
-          grepl(bkg_pattern,  sample_names) ~ "Background",
+          matched ~ "Standard",
+          grepl(ctrl_pattern, df$Sample) ~ "Control",
+          grepl(bkg_pattern, df$Sample) ~ "Background",
           TRUE ~ "Sample"
         )
         
-        return(df)
-    })
+        # Information displayed when hovering over a well
+        df$HoverLabel <- ifelse(
+          matched,
+          paste0(
+            "<b>Well:</b> ", df$Well_ID,
+            "<br><b>Sample:</b> ", df$Sample,
+            "<br><b>Standard dilution:</b> ", df$Dilution,
+            "<br><b>Plate:</b> ", df$Plate
+          ),
+          paste0(
+            "<b>Well:</b> ", df$Well_ID,
+            "<br><b>Sample:</b> ", df$Sample,
+            "<br><b>Type:</b> ", df$Well_Type,
+            "<br><b>Plate:</b> ", df$Plate
+          )
+        )
+        
+        df
+  })
+        
+    #     # 3. Create Search Patterns from UI Inputs
+    #     # Helper to handle empty inputs or comma-separated lists
+    #     get_pattern <- function(input_val, default = "___NONE___") {
+    #       if (is.null(input_val) || input_val == "") return(default)
+    #       # Split by comma, trim whitespace, and create an OR regex (e.g. "pos|control")
+    #       vals <- trimws(strsplit(input_val, ",")[[1]])
+    #       paste0("(?i)(", paste(vals, collapse = "|"), ")")
+    #     }
+    #     
+    #     std_pattern  <- get_pattern(input$std_labelInput)
+    #     ctrl_pattern <- get_pattern(input$control_labelInput)
+    #     # Default background includes "blank" or "background" even if input is empty
+    #     bkg_pattern  <- get_pattern(input$bkg_labelInput, default = "(?i)(blank|background)")
+    #     
+    #     # 4. Identify Well Types
+    #     # We use the 'Sample' column (usually column 2)
+    #     sample_names <- df$Sample # Or df[[2]] if the column name varies
+    #     
+    #     df$Well_Type <- dplyr::case_when(
+    #       grepl(std_pattern,  sample_names) ~ "Standard",
+    #       grepl(ctrl_pattern, sample_names) ~ "Control",
+    #       grepl(bkg_pattern,  sample_names) ~ "Background",
+    #       TRUE ~ "Sample"
+    #     )
+    #     
+    #     return(df)
+    # })
     
   # Select plate for plate map
   output$plate_selection_control <- renderUI({
@@ -1243,15 +1407,13 @@ server <- function(input, output, session) {
     
     
   # Render the Plate Map Plot
-  output$plate_layout_map <- renderPlot({
-      req(tagged_data())
-      req(input$plate_select_map)
-      req(input$plate_size)
+  output$plate_layout_map <- renderPlotly({
+      req(tagged_data(), input$plate_select_map, input$plate_size)
       
       # Filter for the selected plate
       df_plot <- tagged_data() %>%
         filter(Plate == input$plate_select_map) %>%
-        filter(!is.na(Row_ID) & Row_ID != "" & !is.na(Col_ID))
+        filter(!is.na(Row_ID), Row_ID != "", !is.na(Col_ID))
       
       # Determine Grid Dimensions based on UI selection
       if (input$plate_size == "96") {
@@ -1262,26 +1424,41 @@ server <- function(input, output, session) {
         cols_to_show <- 1:24
       }
       
-      # Clean data for plate map plot
-      if (input$plate_size == "96") {
-        df_plot <- tagged_data() %>%
-        filter(Plate == input$plate_select_map) %>%
-        filter(Row_ID %in% rows_to_show) %>%   # Strictly A:H
-        filter(Col_ID %in% cols_to_show) %>%   # Strictly 1:12
-        mutate(Row_ID = factor(Row_ID, levels = rev(rows_to_show)))
-      }
+      # Restrict wells to the selected plate size
+      df_plot <- df_plot %>%
+        dplyr::filter(
+          Row_ID %in% rows_to_show,
+          Col_ID %in% cols_to_show
+        ) %>%
+        dplyr::mutate(
+          Row_ID = factor(Row_ID, levels = rev(rows_to_show)),
+          Well_Label = ifelse(
+            Well_Type == "Standard",
+            Dilution,
+            Well_ID
+          )
+        )
+      # # Clean data for plate map plot
+      # if (input$plate_size == "96") {
+      #   df_plot <- tagged_data() %>%
+      #   filter(Plate == input$plate_select_map) %>%
+      #   filter(Row_ID %in% rows_to_show) %>%   # Strictly A:H
+      #   filter(Col_ID %in% cols_to_show) %>%   # Strictly 1:12
+      #   mutate(Row_ID = factor(Row_ID, levels = rev(rows_to_show)))
+      # }
       
       # Plate layout map
-      ggplot(df_plot %>%
-        filter(!is.na(Row_ID), Row_ID != "NA"), aes(x = Col_ID, y = factor(Row_ID, levels = rev(rows_to_show)))) +
-        geom_point(aes(color = Well_Type), size = ifelse(input$plate_size == "96", 18, 7)) +
-        geom_text(aes(label = Well_ID), size = ifelse(input$plate_size == "96", 6, 3)) +
+      p <- ggplot(df_plot, # %>% filter(!is.na(Row_ID), Row_ID != "NA"), 
+                  aes(x = Col_ID, y = factor(Row_ID, levels = rev(rows_to_show)), text = HoverLabel)) +
+        geom_point(aes(color = Well_Type), size = ifelse(input$plate_size == "96", 15, 5)) +
+        geom_text(aes(label = Well_Label), size = ifelse(input$plate_size == "96", 3, 1.3)) + # Show dilution inside standard wells
+        # geom_text(aes(label = Well_ID), size = ifelse(input$plate_size == "96", 6, 3)) +
         scale_x_continuous(breaks = cols_to_show, limits = range(cols_to_show), position = "top") +
         scale_color_manual(values = c(
-          "Standard"   = "chocolate3", 
-          "Control"    = "darkseagreen", 
+          "Standard" = "chocolate3", 
+          "Control" = "darkseagreen", 
           "Background" = "deepskyblue3", 
-          "Sample"     = "linen"
+          "Sample" = "linen"
         )) +
         theme_minimal() +
         labs(title = paste("Plate Layout:", input$plate_select_map), x = "Column", y = "Row", color = "Sample type") +
@@ -1290,7 +1467,20 @@ server <- function(input, output, session) {
               axis.title = element_text(size = 17),
               axis.text = element_text(size = 15),
               plot.title = element_text(size = 20, face = "bold", hjust = 0.5))
-    })
+    
+      # Convert to interactive Plotly map
+      plotly::ggplotly(
+        p,
+        tooltip = "text"
+      ) %>%
+        plotly::layout(
+          hoverlabel = list(align = "left")
+        ) %>%
+        plotly::config(
+          displayModeBar = FALSE,
+          responsive = TRUE
+        )
+  })
     
   # Data preparation beads - Reactive for bead count
   bead_data <- reactive({
@@ -1427,15 +1617,15 @@ server <- function(input, output, session) {
           
           tags$strong(
             paste0("\u26A0 ", flagged_plates$Plate[i])
-          ),
+          ) #,
           
-          tags$p(
-            paste(
-              flagged_plates$Low_bead_count_results[i],
-              "bead-count result(s) below threshold"
-            ),
-            style = "margin: 4px 0 0 0; font-size: 12px;"
-          )
+          # This tells you how many beads are below threshold per plate. Not needed?
+          # tags$p(
+          #   paste(
+          #     flagged_plates$Low_bead_count_results[i] # , "bead-count result(s) below threshold"
+          #   ),
+          #   style = "margin: 4px 0 0 0; font-size: 12px;"
+          # )
         )
       })
     )
@@ -1719,29 +1909,73 @@ server <- function(input, output, session) {
       )
     })
     
-    submitted_standards <- reactiveVal(character(0))
+    # submitted_standards <- reactiveVal(character(0))
+    # 
+    # observeEvent(input$std_labelButton, {
+    #   
+    #   labels <- trimws(
+    #     unlist(strsplit(input$std_labelInput, ",", fixed = TRUE))
+    #   )
+    #   
+    #   labels <- labels[nzchar(labels)]
+    #   
+    #   submitted_standards(labels)
+    #   
+    #   output$std_labels <- renderText({
+    #     paste(
+    #       "Submitted standard samples:",
+    #       paste(labels, collapse = ", ")
+    #     )
+    #   })
+    # })
     
-    observeEvent(input$std_labelButton, {
-      
-      labels <- trimws(
-        unlist(strsplit(input$std_labelInput, ",", fixed = TRUE))
-      )
-      
-      labels <- unique(labels[nzchar(labels)])
-      
-      submitted_standards(labels)
-      
-      output$std_labels <- renderText({
-        if (length(labels) == 0) {
-          "No standard curves submitted."
-        } else {
-          paste(
-            "Submitted standard curves:",
-            paste(labels, collapse = ", ")
-          )
-        }
-      })
-    })
+    # # Map standards to dilution
+    # standard_mapping <- reactive({
+    #   
+    #   labels <- submitted_standards()
+    #   dilutions <- normalise_dilution(user_dilutions())
+    #   
+    #   req(length(labels) > 0, length(dilutions) > 0)
+    #   
+    #   validate(
+    #     need(
+    #       length(labels) == length(dilutions),
+    #       "Please enter the same number of standard samples and dilutions, in the same order."
+    #     )
+    #   )
+    #   
+    #   # Convert dilutions such as 1:50 to 1/50
+    #   dilutions <- gsub(":", "/", dilutions, fixed = TRUE)
+    #   
+    #   # Extract the numeric dilution factor
+    #   numerator <- as.numeric(sub("/.*", "", dilutions))
+    #   denominator <- as.numeric(sub(".*/", "", dilutions))
+    #   
+    #   validate(
+    #     need(
+    #       all(is.finite(numerator) & is.finite(denominator) &
+    #             numerator > 0 & denominator > 0),
+    #       "Please check the dilution format. Use values such as 1/50."
+    #     )
+    #   )
+    #   
+    #   # Derive the standard series name from the sample label
+    #   standard_names <- sub(
+    #     "[_[:space:]:-]*[0-9]+/[0-9]+$",
+    #     "",
+    #     labels
+    #   )
+    #   
+    #   data.frame(
+    #     Sample = labels,
+    #     Standard = standard_names,
+    #     Dilution = dilutions,
+    #     DilutionFactor = denominator / numerator,
+    #     Order = seq_along(labels),
+    #     stringsAsFactors = FALSE
+    #   )
+    # })
+    
     
       
       # Allow user to select up to 5 plates for comparison (compare standard curves visually) 
