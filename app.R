@@ -308,10 +308,10 @@ std_curve_plots_ui <- function(){
              ),
              mainPanel(
                h4("Standard Curve Plot", align = "center"),
-               plotlyOutput("std_curve_plot", height = "600px"),
-               hr(),
-               h4("Standard Curve Data", align = "center"),
-               DT::dataTableOutput("std_table")
+               plotlyOutput("std_curve_plot", height = "600px") #,
+               # hr(),
+               # h4("Standard Curve Data", align = "center"),
+               # DT::dataTableOutput("std_table")
              )
            )
   )
@@ -319,42 +319,47 @@ std_curve_plots_ui <- function(){
 
 levey_jennings_plots_ui <- function(){
 
-    tabPanel("Plate variation", 
-        sidebarLayout(
-            sidebarPanel("", width=3,
-                p(
-                    "Levey-Jennings plots tracks how control samples behave over time across different plates.",
-                    " The Levey-Jennings plot is a plot shows the median MFI for each antigen and",
-                    " plate. The lines indicate 1 and 2 standard deviations from the mean. ",
-                    "This plot can be used to identify antigens that are not performing well."
-                ),
-                
-                hr(),
-                h5("Levey-Jennings controls"),
-                uiOutput("levey_jennings_select_points"),
-                
-                hr(),
-                
-                p(
-                    "The coefficient of variation is a measure of the variation between samples",
-                    "in a plate. It is calculated as the standard deviation divided by the mean."
-                ),
-            
-            ),
-            
-                
-            mainPanel(
-                h4("Levey-Jennings plots"),
-                uiOutput("levey_jennings_plots"),
-                
-                hr(),
-                
-                h4("Coefficient of variation plots"),
-                uiOutput("coefv_plots")
-                
-            )
+  tabPanel(
+    "Plate variation",
+    
+    sidebarLayout(
+      
+      sidebarPanel(
+        width = 3,
+        
+        p(
+          "Levey-Jennings plots track how control samples behave over time across different plates. ",
+          "Each plot shows the median MFI for each antigen and plate. ",
+          "The lines indicate 1 to 3 standard deviations from the mean. ",
+          "These plots can help identify antigens or plates that are not performing consistently."
+        ),
+        
+        hr(),
+        
+        p(
+          "The coefficient of variation (CV) measures the variation between samples ",
+          "in a plate. It is calculated as the standard deviation divided by the mean."
         )
+      ),
+      
+      mainPanel(
+        
+        h4("Levey-Jennings plots"),
+        uiOutput("levey_jennings_plots"),
+        # h5("Standard controls"),
+        # plotlyOutput("levey_jennings_standard_plot"),
+        # 
+        # h5("Standard background wells"),
+        # plotlyOutput("levey_jennings_background_plot"),
+        
+        hr(),
+        
+        h4("Coefficient of variation plots"),
+        uiOutput("coefv_plots")
+        
+      )
     )
+  )
 }
 
 normalisation_ui <- function(){
@@ -694,7 +699,7 @@ server <- function(input, output, session) {
     
     
   # Set up background values 
-    bkg_labels <- ("(?i)(blank|background)") # contains any cell that has blank or background
+    bkg_labels <- reactiveVal("(?i)(blank|background)") # contains any cell that has blank or background
     
     output$bkg_labels <- renderUI({
       HTML(paste0(
@@ -713,8 +718,8 @@ server <- function(input, output, session) {
       
       if(length(labels) > 0){
         # Combine into regex pattern
-        regex_pattern <- paste(labels, collapse = ",")
-        bkg_labels(regex_pattern)  # update reactiveVal
+        regex_pattern <- paste(labels, collapse = "|")
+        bkg_labels(paste0("(?i)(", regex_pattern, ")")) # update reactiveVal
         
         # Update displayed text
         output$bkg_labels <- renderText({
@@ -1822,242 +1827,9 @@ server <- function(input, output, session) {
                 choices = d()$platenames) )
     })
 
-    # Standard Curves
-    output$std_table <- DT::renderDataTable({
-      
-      req(std_data(), user_dilutions())
-      
-      mapping <- standard_mapping()
-      plates <- std_data()$plates
-      antigen <- input$std_curve_antigen
-      # dilutions <- user_dilutions()
-      
-      # # Get the standard names submitted on the Upload page
-      # labels <- submitted_standards()
-      
-      standard_tables <- lapply(names(plates), function(plate_name) {
-        
-        pd <- plates[[plate_name]]
-        
-        if (is.null(pd) ||
-            !"Sample" %in% names(pd) ||
-            !antigen %in% names(pd)) {
-          return(NULL)
-        }
-        
-        sample_names <- tolower(trimws(as.character(pd$Sample)))
-        submitted_names <- tolower(trimws(mapping$Sample))
-        
-        match_index <- match(sample_names, submitted_names)
-        keep <- !is.na(match_index)
-        
-        if (!any(keep)) return(NULL)
-        
-        matched <- mapping[match_index[keep], , drop = FALSE]
-        
-        well <- if ("Location" %in% names(pd)) {
-          as.character(pd$Location[keep])
-        } else {
-          rep(NA_character_, sum(keep))
-        }
-        
-        result <- data.frame(
-          Plate = plate_name,
-          Well = well,
-          Sample = as.character(pd$Sample[keep]),
-          Dilution = matched$Dilution,
-          DilutionFactor = matched$DilutionFactor,
-          DilutionOrder = matched$DilutionOrder,
-          Antigen = antigen,
-          MFI = suppressWarnings(
-            as.numeric(as.character(pd[[antigen]][keep]))
-          ),
-          stringsAsFactors = FALSE
-        )
-        
-        result
-      })
-      
-      standard_tables <- Filter(
-        function(x) !is.null(x) && nrow(x) > 0,
-        standard_tables
-      )
-      
-      validate(
-        need(
-          length(standard_tables) > 0,
-          "No submitted standard sample labels matched the uploaded plates."
-        )
-      )
-      
-      combined <- do.call(rbind, standard_tables)
-      
-      combined <- combined[
-        order(combined$Plate, combined$DilutionOrder),
-        ,
-        drop = FALSE
-      ]
-      
-      rownames(combined) <- NULL
-      
-      DT::datatable(
-        combined,
-        options = list(
-          pageLength = 25,
-          scrollX = TRUE
-        ),
-        rownames = FALSE
-      )
-    })
-      
-    #   # Identify matching standards on every plate
-    #   standard_tables <- lapply(names(plates), function(plate_name) {
-    #     
-    #     plate_data <- plates[[plate_name]]
-    #     
-    #     identified <- identify.standards(
-    #       plate_data,
-    #       dilutions
-    #     )
-    #     
-    #     # Retain only identified standard samples
-    #     keep <- identified$IsStandardCandidate &
-    #       !is.na(identified$Standard)
-    #     
-    #     # Restrict to submitted standard names
-    #     if (length(labels) > 0) {
-    #       keep <- keep &
-    #         tolower(identified$Standard) %in% tolower(labels)
-    #     }
-    #     
-    #     if (!any(keep)) {
-    #       return(NULL)
-    #     }
-    #     
-    #     result <- plate_data[keep, , drop = FALSE]
-    #     
-    #     result$Plate <- plate_name
-    #     result$Standard <- identified$Standard[keep]
-    #     result$MatchedDilution <- identified$Dilution[keep]
-    #     
-    #     result$DilutionOrder <- match(
-    #       result$MatchedDilution,
-    #       normalise_dilution(dilutions)
-    #     )
-    #     
-    #     result <- result[
-    #       order(result$Standard, result$DilutionOrder),
-    #       ,
-    #       drop = FALSE
-    #     ]
-    #     
-    #     result
-    #   })
-    #   
-    #   # Remove plates without matching standards
-    #   standard_tables <- Filter(
-    #     Negate(is.null),
-    #     standard_tables
-    #   )
-    #   
-    #   validate(need(
-    #     length(standard_tables) > 0,
-    #     "No standard-curve samples matched your submitted standard names and dilutions."
-    #   ))
-    #   
-    #   # Combine matching samples across all plates
-    #   combined <- do.call(rbind, standard_tables)
-    #   rownames(combined) <- NULL
-    #   
-    #   DT::datatable(
-    #     combined,
-    #     options = list(pageLength = 25, scrollX = TRUE),
-    #     rownames = FALSE
-    #   )
-    # })
-    
-    # submitted_standards <- reactiveVal(character(0))
-    # 
-    # observeEvent(input$std_labelButton, {
-    #   
-    #   labels <- trimws(
-    #     unlist(strsplit(input$std_labelInput, ",", fixed = TRUE))
-    #   )
-    #   
-    #   labels <- labels[nzchar(labels)]
-    #   
-    #   submitted_standards(labels)
-    #   
-    #   output$std_labels <- renderText({
-    #     paste(
-    #       "Submitted standard samples:",
-    #       paste(labels, collapse = ", ")
-    #     )
-    #   })
-    # })
-    
-    # # Map standards to dilution
-    # standard_mapping <- reactive({
-    #   
-    #   labels <- submitted_standards()
-    #   dilutions <- normalise_dilution(user_dilutions())
-    #   
-    #   req(length(labels) > 0, length(dilutions) > 0)
-    #   
-    #   validate(
-    #     need(
-    #       length(labels) == length(dilutions),
-    #       "Please enter the same number of standard samples and dilutions, in the same order."
-    #     )
-    #   )
-    #   
-    #   # Convert dilutions such as 1:50 to 1/50
-    #   dilutions <- gsub(":", "/", dilutions, fixed = TRUE)
-    #   
-    #   # Extract the numeric dilution factor
-    #   numerator <- as.numeric(sub("/.*", "", dilutions))
-    #   denominator <- as.numeric(sub(".*/", "", dilutions))
-    #   
-    #   validate(
-    #     need(
-    #       all(is.finite(numerator) & is.finite(denominator) &
-    #             numerator > 0 & denominator > 0),
-    #       "Please check the dilution format. Use values such as 1/50."
-    #     )
-    #   )
-    #   
-    #   # Derive the standard series name from the sample label
-    #   standard_names <- sub(
-    #     "[_[:space:]:-]*[0-9]+/[0-9]+$",
-    #     "",
-    #     labels
-    #   )
-    #   
-    #   data.frame(
-    #     Sample = labels,
-    #     Standard = standard_names,
-    #     Dilution = dilutions,
-    #     DilutionFactor = denominator / numerator,
-    #     Order = seq_along(labels),
-    #     stringsAsFactors = FALSE
-    #   )
-    # })
-    
-    
-      
-      # Allow user to select up to 5 plates for comparison (compare standard curves visually) 
-    output$std_curve_plate_selection <- renderUI({
-      req(d())
-      selectizeInput(
-        inputId = "std_curve_input",
-        label = "",
-        choices = d()$platenames,
-        selected = d()$platenames,   # ← defaults to first plate so plot renders immediately
-        multiple = TRUE # ,
-        # options = list(maxItems = 5)
-      )
-    })
-    
+    ####################################################################################
+    # ----- Standard Curves -----
+    ####################################################################################
     # Parse standard labels entered by the user (comma or newline separated)
     parsed_standards <- reactive({
       req(input$std_labelInput)
@@ -2087,20 +1859,6 @@ server <- function(input, output, session) {
         selected = standards[1]
       )
     })
-    
-    # Dropdown for antigens
-    output$std_curve_antigen_selection <- renderUI({
-      
-      req(d())
-      
-      selectInput(
-        inputId = "std_curve_antigen",
-        label = "",
-        choices = d()$ags,
-        selected = d()$ags[1]
-      )
-    })
-    
     
     # Standard curves: all plates, standards and antigens
     output$std_curve_plot <- plotly::renderPlotly({
@@ -2199,7 +1957,7 @@ server <- function(input, output, session) {
         )
       )
       
-      # Log-transform MFI
+      # Log10-transform MFI
       df$LogMFI <- log10(df$MFI)
       
       # Prepare dilution labels for the x-axis
@@ -2256,7 +2014,7 @@ server <- function(input, output, session) {
           axis.text.x = element_text(angle = 35, hjust = 1),
           strip.text = element_text(face = "bold"),
           legend.position = "bottom",
-          panel.spacing = unit(0.5, "lines"),
+          panel.spacing = unit(0.85, "lines"),
           legend.box.margin = margin(t = -10),
           legend.margin = margin(t = -5),
           plot.margin = margin(
@@ -2292,58 +2050,169 @@ server <- function(input, output, session) {
       
     })
 
-    # QC
-    ## Levey-Jennings controls for tracking high, mid, and low dilution points across plates
+    # ----- Levey Jennings plots -----
+    # Select dilution for Levey-Jennings plot across plates
     output$levey_jennings_select_points <- renderUI({
-        tagList(
-            selectInput("levey_high", "Select high dilution", user_dilutions(), selected="1/10"),
-            selectInput("levey_mid", "Select mid dilution", user_dilutions(), selected="1/50"),
-            selectInput("levey_low", "Select low dilution", user_dilutions(),selected="1/250") )
+      choices <- user_dilutions()
+      req(length(choices) > 0)
+      selectInput(
+        "levey_dilution",
+        "Select dilution",
+        choices = choices,
+        selected = choices[1]
+      )
     })
-
-    ## Plots coefficient of variation across dilutions to see consistency of replicates
-    output$coefv_plots <- renderUI({
-        req(input$fileUpload)
-        fluidRow(
-            column(12,
-                renderPlotly({
-                    plot.coefv(
-                        data = d()$plates,
-                        ag(),
-                        std_label = std_labels(),
-                        dilutions=user_dilutions(),
-                        target_dilution = "1/250" ) 
-                })  ),
-            column(12,
-                renderPlotly({
-                    plot.coefv(
-                        data = d()$plates,
-                        ag(),
-                        std_label = std_labels(),
-                        dilutions=user_dilutions(),
-                        target_dilution = "1/1250" )
-                }) )
-        ) })
 
     ## Generate Levey-Jennings plots for each antigen
     output$levey_jennings_plots <- renderUI({
-        req(input$fileUpload)
-        fluidRow(
-            lapply(ag(), function(antigen) {
-                column(6,
-                    renderPlot({
-                        levey.jennings(
-                            data = d()$combineddatesplates,
-                            std_label = std_labels(),
-                            blank_label = bkg_labels, # "Background0",
-                            dil_high = input$levey_high,
-                            dil_mid = input$levey_mid,
-                            dil_low = input$levey_low,
-                            by_var = "plate",
-                            ag_list = c(antigen) )
-                }) )
-            }) )
+      req(input$fileUpload, ag())
+      
+      n_ags <- length(ag())
+      plot_height <- max(600, ceiling(n_ags / 3) * 280)
+      
+      tagList(
+        h5(paste("Standard controls", input$levey_dilution)),
+        plotlyOutput(
+          "levey_jennings_standard_plot",
+          height = paste0(plot_height, "px")
+        ),
+        
+        hr(),
+        
+        h5("Background controls"),
+        plotlyOutput(
+          "levey_jennings_background_plot",
+          height = paste0(plot_height, "px")
+        )
+      )
     })
+    #     fluidRow(
+    #         lapply(ag(), function(antigen) {
+    #             column(6,
+    #                 renderPlot({
+    #                     levey.jennings(
+    #                         data = d()$combineddatesplates,
+    #                         std_label = std_labels(),
+    #                         blank_label = bkg_labels, # "Background0",
+    #                         dil_high = input$levey_high,
+    #                         dil_mid = input$levey_mid,
+    #                         dil_low = input$levey_low,
+    #                         by_var = "plate",
+    #                         ag_list = c(antigen) )
+    #             }) )
+    #         }) )
+    # })
+    
+    ## Standard control Levey-Jennings plot
+    output$levey_jennings_standard_plot <- renderPlotly({
+      
+      req(input$fileUpload)
+      req(input$levey_dilution)
+      
+      all_data <- d()$combineddatesplates
+      
+      print(unique(all_data$Sample))
+      print(std_labels())
+      print(input$levey_dilution)
+      
+      standard_data <- all_data[grepl(std_labels(), all_data$Sample, perl = TRUE), , drop = FALSE]
+      
+      # dilution_pattern <- paste0(input$levey_dilution, "(?![0-9])")
+      
+      standard_data <- standard_data[grepl(input$levey_dilution, standard_data$Sample, fixed = TRUE), , drop = FALSE]
+      
+      validate(
+        need(
+          nrow(standard_data) > 0,
+          "No standard control samples were found for this dilution."
+        )
+      )
+      
+      p <- levey.jennings.plot(sample_data = standard_data, ag_list = ag(), plot_title = paste("Levey-Jennings plots -", input$levey_dilution))
+      
+      # plot_height <- max(600, ceiling(length(unique(length(ag()))) / 3) * 280)
+      
+      plotly::ggplotly(
+        p,
+        tooltip = "text"
+      ) %>%
+        plotly::layout(
+          legend = list(
+            orientation = "h",
+            x = 0.5,
+            xanchor = "center",
+            y = 0,
+            yanchor = "bottom"
+          ),
+          margin = list(
+            t = 40,
+            b = 60
+          )
+        )
+    })
+    
+    
+    ## Background control Levey-Jennings plot
+    output$levey_jennings_background_plot <- renderPlotly({
+      
+      req(input$fileUpload)
+      
+      all_data <- d()$combineddatesplates
+      
+      # Identify background control samples
+      background_data <- all_data[grepl(bkg_labels(), all_data$Sample), , drop = FALSE]
+      
+      validate(
+        need(
+          nrow(background_data) > 0,
+          "No background control samples were found."
+        )
+      )
+      
+      p <- levey.jennings.plot(sample_data = background_data, ag_list = ag(), plot_title = "Levey-Jennings plots - Background controls")
+      
+      # plot_height <- max(600, ceiling(length(unique(length(ag()))) / 3) * 280)
+      
+      plotly::ggplotly(
+        p,
+        tooltip = "text"
+      ) %>%
+        plotly::layout(
+          legend = list(
+            orientation = "h",
+            x = 0.5,
+            xanchor = "center"
+          ),
+          margin = list(
+            t = 50,
+            b = 70
+          )
+        )
+    })
+    
+    ## Plots coefficient of variation across dilutions to see consistency of replicates
+    output$coefv_plots <- renderUI({
+      req(input$fileUpload)
+      fluidRow(
+        column(12,
+               renderPlotly({
+                 plot.coefv(
+                   data = d()$plates,
+                   ag(),
+                   std_label = std_labels(),
+                   dilutions=user_dilutions(),
+                   target_dilution = "1/250" ) 
+               })  ),
+        column(12,
+               renderPlotly({
+                 plot.coefv(
+                   data = d()$plates,
+                   ag(),
+                   std_label = std_labels(),
+                   dilutions=user_dilutions(),
+                   target_dilution = "1/1250" )
+               }) )
+      ) })
     
   # Generate low bead plot for each antigen
     output$bead_count_ui_dynamic <- renderUI({

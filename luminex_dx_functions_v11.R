@@ -1162,314 +1162,470 @@ plot.plate <- function(data1,antigen,plotfile="plot1.pdf",plot=F,path=getwd()) {
 ##### "levey.jennings" function #####
 ### ### ### ### ### ### ### ### ### #
 # Jody original
-levey.jennings <- function (data, std_label, blank_label, dil_high,dil_mid,dil_low,ag_list,by_var="date",subref=NULL,labels=F) {
+levey.jennings <- function (data, std_label, blank_label, dilution, ag_list, by_var="date", subref=NULL, labels=F) {
 
-  is.wholenumber <-
-    function(x, tol = .Machine$double.eps^0.5)  abs(x - round(x)) < tol
+  # is.wholenumber <-
+  #   function(x, tol = .Machine$double.eps^0.5)  abs(x - round(x)) < tol
   
-  std_all <- data[grep(std_label, data$Sample),]
-  blank_all <- data[grep(blank_label, data$Sample),]
+  std_all <- data[grep(std_label, data$Sample, ignore.case = TRUE), , drop = FALSE]
+  blank_all <- data[grep(blank_label, data$Sample, ignore.case = TRUE), , drop = FALSE]
+  std_selected <- std_all[grepl(dilution, std_all$Sample, fixed = TRUE), , drop = FALSE]
   
-  std_all_high <- std_all[grep(dil_high, std_all$Sample),]
-  std_all_mid <- std_all[grep(dil_mid, std_all$Sample),]
-  std_all_low <- std_all[grep(dil_low, std_all$Sample),]
-
-  if (by_var=="date") {
+  # std_all_high <- std_all[grep(dil_high, std_all$Sample),]
+  # std_all_mid <- std_all[grep(dil_mid, std_all$Sample),]
+  # std_all_low <- std_all[grep(dil_low, std_all$Sample),]
   
-    par(oma=c(3,1,1,1),mfrow=c(2,4),mar=c(5.1,4.1,4.1,2.1))
-    
-    for (i in 1:length(ag_list)) {
-      
-    # highest dilution
-      
-      plot (std_all_high$date, std_all_high[,ag_list[i]], pch=21,col="black",bg=alpha("darkblue",0.5),
-            ylim=c(0,max(std_all_high[,ag_list[i]],na.rm=T)*1.25),
-            ylab="median MFI", xlab="date",cex.axis=1,cex.main=1.2,cex.lab=1.4,cex=1.4,
-            main=paste0(ag_list[i]," ",dil_high))
-      
-      if(is.null(subref)==T) {
-        
-        mean <- mean(std_all_high[,ag_list[i]],na.rm=T)
-        sd <- sd(std_all_high[,ag_list[i]],na.rm=T) 
-        
-      } else if(is.null(subref)==F) {
-      
-        qc_set <- subref[grep(std_label, subref$Sample),]
-        qc_set_high <- qc_set[grep(dil_high, qc_set$Sample),]
-        
-        mean <- mean(qc_set_high[,ag_list[i]],na.rm=T)
-        sd <- sd(qc_set_high[,ag_list[i]],na.rm=T) 
-      
-      }
-      
-      abline(h=mean)
-      abline(h=mean+2*sd,lty=2)
-      abline(h=mean-2*sd,lty=2)
-      abline(h=mean+sd,lty=3)
-      abline(h=mean-sd,lty=3)
-
-      if(labels==T) {text(std_all_high$date, std_all_high[,ag_list[i]],labels=std_all_high$plate,pos=3,cex=0.6)}
-      
-    # mid dilution
-      
-      plot (std_all_mid$date, std_all_mid[,ag_list[i]], pch=21,col="black",bg=alpha("darkred",0.5),
-            ylim=c(0,max(std_all_high[,ag_list[i]],na.rm=T)*1.25),
-            ylab="median MFI", xlab="date",cex.axis=1.2,cex.main=1.5,cex.lab=1.4,cex=1.4,
-            main=paste0(ag_list[i]," ",dil_mid))
-      
-      mean <- mean(std_all_mid[,ag_list[i]],na.rm=T)
-      sd <- sd(std_all_mid[,ag_list[i]],na.rm=T)
-      
-      if(is.null(subref)==T) {
-        
-        mean <- mean(std_all_mid[,ag_list[i]],na.rm=T)
-        sd <- sd(std_all_mid[,ag_list[i]],na.rm=T)
-        
-      } else if(is.null(subref)==F)  {
-        
-        qc_set <- subref[grep(std_label, subref$Sample),]
-        qc_set_mid <- qc_set[grep(dil_mid, qc_set$Sample),]
-        
-        mean <- mean(qc_set_mid[,ag_list[i]],na.rm=T)
-        sd <- sd(qc_set_mid[,ag_list[i]],na.rm=T) 
-        
-      }
-      
-      abline(h=mean)
-      abline(h=mean+2*sd,lty=2)
-      abline(h=mean-2*sd,lty=2)
-      abline(h=mean+sd,lty=3)
-      abline(h=mean-sd,lty=3)
-      
-      if(labels==T) {text(std_all_mid$date, std_all_mid[,ag_list[i]],labels=std_all_mid$plate,pos=3,cex=0.6)}
-      
-    # low dilution
-      
-      plot (std_all_low$date, std_all_low[,ag_list[i]], pch=21,col="black",bg=alpha("goldenrod2",0.5),
-            ylim=c(0,max(std_all_high[,ag_list[i]],na.rm=T)*1.25),
-            ylab="median MFI", xlab="date",cex.axis=1.2,cex.main=1.5,cex.lab=1.4,cex=1.4,
-            main=paste0(ag_list[i]," ",dil_low))
-      
-      mean <- mean(std_all_low[,ag_list[i]],na.rm=T)
-      sd <- sd(std_all_low[,ag_list[i]],na.rm=T)
-      
-      if(is.null(subref)==T) {
-        
-        mean <- mean(std_all_low[,ag_list[i]],na.rm=T)
-        sd <- sd(std_all_low[,ag_list[i]],na.rm=T)
-        
-      } else if(is.null(subref)==F)  {
-        
-        qc_set <- subref[grep(std_label, subref$Sample),]
-        qc_set_low <- qc_set[grep(dil_low, qc_set$Sample),]
-        
-        mean <- mean(qc_set_low[,ag_list[i]],na.rm=T)
-        sd <- sd(qc_set_low[,ag_list[i]],na.rm=T) 
-        
-      }
-      
-      abline(h=mean)
-      abline(h=mean+2*sd,lty=2)
-      abline(h=mean-2*sd,lty=2)
-      abline(h=mean+sd,lty=3)
-      abline(h=mean-sd,lty=3)
-      
-      if(labels==T) {text(std_all_low$date, std_all_low[,ag_list[i]],labels=std_all_low$plate,pos=3,cex=0.6)}
-      
-      # blanks
-      
-      plot (blank_all$date, blank_all[,ag_list[i]], pch=21,col="black",bg=alpha("black",0.3),
-            ylim=c(0,max(blank_all[,ag_list[i]],na.rm=T)*1.25),
-            ylab="median MFI", xlab="date",cex.axis=1.2,cex.main=1.5,cex.lab=1.4,
-            main=paste0(ag_list[i]," ","Background"))
-      
-      mean <- mean(blank_all[,ag_list[i]],na.rm=T)
-      sd <- sd(blank_all[,ag_list[i]],na.rm=T)
-      
-      if(is.null(subref)==T) {
-        
-        mean <- mean(blank_all[,ag_list[i]],na.rm=T)
-        sd <- sd(blank_all[,ag_list[i]],na.rm=T)
-        
-      } else if(is.null(subref)==F)  {
-        
-        qc_set_blank <- subref[grep(blank_label, subref$Sample),]
-        
-        mean <- mean(qc_set_blank[,ag_list[i]],na.rm=T)
-        sd <- sd(qc_set_blank[,ag_list[i]],na.rm=T) 
-        
-      }
-      
-      abline(h=mean)
-      abline(h=mean+2*sd,lty=2)
-      abline(h=mean-2*sd,lty=2)
-      abline(h=mean+sd,lty=3)
-      abline(h=mean-sd,lty=3)
-      
-      text(blank_all$date, blank_all[,ag_list[i]],labels=blank_all$plate,pos=3,cex=0.8)
-      
-      if (is.wholenumber(i/3)) {
-      par(fig= c(0,1,0,1), oma=c(0,0,0,0),mar=c(0.5,0.5,0.5,0.5),new=TRUE)
-      plot(0, 0, type = "n", bty="n", xaxt = "n", yaxt = "n")
-      legend("bottom", c("Mean", "+/- 2 SD", "+/- 1 SD", "Data"), xpd = TRUE, horiz = TRUE, 
-             inset = c(0,0), bty="n",lty = c(1,2,3,NA), pch=c(NA,NA,NA,19),cex=1.4)
-      
-      par(oma=c(3,1,1,1),mfrow=c(2,4),mar=c(5.1,4.1,4.1,2.1))
-        
-      }
-    }
+  # Plate x axis
+  if (by_var == "plate") {
+    x_var <- "plate"
+    x_label <- "Plate"
+  } else {
+    x_var <- "date"
+    x_label <- "Date"
   }
   
-  if (by_var=="plate") {
+  # Plot each antigen
+  for (antigen in ag_list) {
     
-    par(oma=c(3,1,1,1),mfrow=c(2,2),mar=c(5.1,4.1,4.1,2.1))
+    par(mfrow = c(1, 2))
     
-    for (i in 1:length(ag_list)) {
+    # Standard control plot
+    values <- suppressWarnings(
+      as.numeric(as.character(std_selected[[antigen]]))
+    )
+    
+    valid <- is.finite(values) & !is.na(std_selected[[x_var]])
+    
+    plot_data <- std_selected[valid, , drop = FALSE]
+    values <- values[valid]
+    
+    if (length(values) > 0) {
       
-      # highest dilution
+      mean_value <- mean(values)
+      sd_value <- sd(values)
       
-      plot (std_all_high$plate, std_all_high[,ag_list[i]], pch=21,col="black",bg=alpha("darkblue",0.5),
-            ylim=c(0,max(std_all_high[,ag_list[i]],na.rm=T)*1.25),
-            ylab="median MFI", xlab="plate",cex.axis=1.2,cex.main=1.5,cex.lab=1.4,cex=1.4,
-            main=paste0(ag_list[i]," ",dil_high))
+      reference_lines <- mean_value +
+        c(-3, -2, -1, 0, 1, 2, 3) * sd_value
       
-      if(is.null(subref)==T) {
-        
-        mean <- mean(std_all_high[,ag_list[i]],na.rm=T)
-        sd <- sd(std_all_high[,ag_list[i]],na.rm=T) 
-        
-      } else if(is.null(subref)==F) {
-        
-        qc_set <- subref[grep(std_label, subref$Sample),]
-        qc_set_high <- qc_set[grep(dil_high, qc_set$Sample),]
-        
-        mean <- mean(qc_set_high[,ag_list[i]],na.rm=T)
-        sd <- sd(qc_set_high[,ag_list[i]],na.rm=T) 
-        
+      y_limits <- range(
+        c(values, reference_lines),
+        finite = TRUE
+      )
+      
+      if (diff(y_limits) == 0) {
+        y_limits <- y_limits + c(-1, 1)
       }
       
-      abline(h=mean)
-      abline(h=mean+2*sd,lty=2)
-      abline(h=mean-2*sd,lty=2)
-      abline(h=mean+sd,lty=3)
-      abline(h=mean-sd,lty=3)
+      plot(
+        plot_data[[x_var]],
+        values,
+        pch = 21,
+        col = "black",
+        bg = "darkblue",
+        ylim = y_limits,
+        ylab = "Median MFI",
+        xlab = x_label,
+        main = paste(antigen, dilution)
+      )
       
-      if(labels==T) {text(std_all_high$plate, std_all_high[,ag_list[i]],labels=std_all_high$plate,pos=3,cex=0.6)}
+      abline(h = mean_value, lty = 1, lwd = 2)
+      abline(h = mean_value + c(-1, 1) * sd_value, lty = 3)
+      abline(h = mean_value + c(-2, 2) * sd_value, lty = 2)
+      abline(h = mean_value + c(-3, 3) * sd_value, lty = 4)
       
-      # mid dilution
-      
-      plot (std_all_mid$plate, std_all_mid[,ag_list[i]], pch=21,col="black",bg=alpha("darkred",0.5),
-            ylim=c(0,max(std_all_high[,ag_list[i]],na.rm=T)*1.25),
-            ylab="median MFI", xlab="plate",cex.axis=1.2,cex.main=1.5,cex.lab=1.4,cex=1.4,
-            main=paste0(ag_list[i]," ",dil_mid))
-      
-      if(is.null(subref)==T) {
-        
-        mean <- mean(std_all_mid[,ag_list[i]],na.rm=T)
-        sd <- sd(std_all_mid[,ag_list[i]],na.rm=T) 
-        
-      } else if(is.null(subref)==F) {
-        
-        qc_set <- subref[grep(std_label, subref$Sample),]
-        qc_set_mid <- qc_set[grep(dil_mid, qc_set$Sample),]
-        
-        mean <- mean(qc_set_mid[,ag_list[i]],na.rm=T)
-        sd <- sd(qc_set_mid[,ag_list[i]],na.rm=T) 
-        
+      if (labels && "plate" %in% names(plot_data)) {
+        text(
+          plot_data[[x_var]],
+          values,
+          labels = plot_data$plate,
+          pos = 3,
+          cex = 0.6
+        )
       }
       
-      abline(h=mean)
-      abline(h=mean+2*sd,lty=2)
-      abline(h=mean-2*sd,lty=2)
-      abline(h=mean+sd,lty=3)
-      abline(h=mean-sd,lty=3)
+    } else {
       
-      if(labels==T) {text(std_all_mid$plate, std_all_mid[,ag_list[i]],labels=std_all_mid$plate,pos=3,cex=0.6)}
+      plot.new()
+      title(main = paste(antigen, dilution))
+      text(0.5, 0.5, "No standard control data found")
       
-      # low dilution
-      
-      plot (std_all_low$plate, std_all_low[,ag_list[i]], pch=21,col="black",bg=alpha("goldenrod2",0.5),
-            ylim=c(0,max(std_all_high[,ag_list[i]],na.rm=T)*1.25),
-            ylab="median MFI", xlab="plate",cex.axis=1.2,cex.main=1.5,cex.lab=1.4,cex=1.4,
-            main=paste0(ag_list[i]," ",dil_low))
-      
-      if(is.null(subref)==T) {
-        
-        mean <- mean(std_all_low[,ag_list[i]],na.rm=T)
-        sd <- sd(std_all_low[,ag_list[i]],na.rm=T)
-        
-      } else if(is.null(subref)==F)  {
-        
-        qc_set <- subref[grep(std_label, subref$Sample),]
-        qc_set_low <- qc_set[grep(dil_low, qc_set$Sample),]
-        
-        mean <- mean(qc_set_low[,ag_list[i]],na.rm=T)
-        sd <- sd(qc_set_low[,ag_list[i]],na.rm=T) 
-        
-      }
-      
-      abline(h=mean)
-      abline(h=mean+2*sd,lty=2)
-      abline(h=mean-2*sd,lty=2)
-      abline(h=mean+sd,lty=3)
-      abline(h=mean-sd,lty=3)
-      
-      if(labels==T) { text(std_all_low$plate, std_all_low[,ag_list[i]],labels=std_all_low$plate,pos=3,cex=0.6)}
-      
-      # blanks
-      
-      plot (blank_all$plate, blank_all[,ag_list[i]], pch=21,col="black",bg=alpha("black",0.3),
-            ylim=c(0,max(blank_all[,ag_list[i]],na.rm=T)*1.25),
-            ylab="median MFI", xlab="plate",cex.axis=1.2,cex.main=1.5,cex.lab=1.4,
-            main=paste0(ag_list[i]," ","Background"))
-      
-      if(is.null(subref)==T) {
-        
-        mean <- mean(blank_all[,ag_list[i]],na.rm=T)
-        sd <- sd(blank_all[,ag_list[i]],na.rm=T)
-        
-      } else if(is.null(subref)==F)  {
-        
-        qc_set_blank <- subref[grep(blank_label, subref$Sample),]
-        
-        mean <- mean(qc_set_blank[,ag_list[i]],na.rm=T)
-        sd <- sd(qc_set_blank[,ag_list[i]],na.rm=T) 
-        
-      }
-      
-      if(is.null(subref)==T) {
-        
-        mean <- mean(blank_all[,ag_list[i]],na.rm=T)
-        sd <- sd(blank_all[,ag_list[i]],na.rm=T)
-        
-      } else if(is.null(subref)==F)  {
-        
-        qc_set_blank <- subref[grep(blank_label, subref$Sample),]
-        
-        mean <- mean(qc_set_blank[,ag_list[i]],na.rm=T)
-        sd <- sd(qc_set_blank[,ag_list[i]],na.rm=T) 
-        
-      }
-      
-      abline(h=mean)
-      abline(h=mean+2*sd,lty=2)
-      abline(h=mean-2*sd,lty=2)
-      abline(h=mean+sd,lty=3)
-      abline(h=mean-sd,lty=3)
-      
-      text(blank_all$plate, blank_all[,ag_list[i]],labels=blank_all$plate,pos=3,cex=0.8)
-      
-      if (is.wholenumber(i/3) | i==length(ag_list)) {
-        par(fig= c(0,1,0,1), oma=c(0,0,0,0),mar=c(0.5,0.5,0.5,0.5),new=TRUE)
-        plot(0, 0, type = "n", bty="n", xaxt = "n", yaxt = "n")
-        legend("bottom", c("Mean", "+/- 2 SD", "+/- 1 SD", "Data"), xpd = TRUE, horiz = TRUE, 
-               inset = c(0,0), bty="n",lty = c(1,2,3,NA), pch=c(NA,NA,NA,19),cex=1.4)
-        
-        par(oma=c(3,1,1,1),mfrow=c(2,4),mar=c(5.1,4.1,4.1,2.1))
-      }
     }
+    
+    # Background plot
+    blank_values <- suppressWarnings(
+      as.numeric(as.character(blank_all[[antigen]]))
+    )
+    
+    valid_blank <- is.finite(blank_values) &
+      !is.na(blank_all[[x_var]])
+    
+    blank_data <- blank_all[valid_blank, , drop = FALSE]
+    blank_values <- blank_values[valid_blank]
+    
+    if (length(blank_values) > 0) {
+      
+      blank_mean <- mean(blank_values)
+      blank_sd <- sd(blank_values)
+      
+      blank_lines <- blank_mean +
+        c(-3, -2, -1, 0, 1, 2, 3) * blank_sd
+      
+      blank_limits <- range(
+        c(blank_values, blank_lines),
+        finite = TRUE
+      )
+      
+      if (diff(blank_limits) == 0) {
+        blank_limits <- blank_limits + c(-1, 1)
+      }
+      
+      plot(
+        blank_data[[x_var]],
+        blank_values,
+        pch = 21,
+        col = "black",
+        bg = "grey60",
+        ylim = blank_limits,
+        ylab = "Median MFI",
+        xlab = x_label,
+        main = paste(antigen, "Background")
+      )
+      
+      abline(h = blank_mean, lty = 1, lwd = 2)
+      abline(h = blank_mean + c(-1, 1) * blank_sd,lty = 3)
+      abline(h = blank_mean + c(-2, 2) * blank_sd,lty = 2)
+      abline(h = blank_mean + c(-3, 3) * blank_sd,lty = 4)
+      
+      if ("plate" %in% names(blank_data)) {
+        text(
+          blank_data[[x_var]],
+          blank_values,
+          labels = blank_data$plate,
+          pos = 3,
+          cex = 0.6
+        )
+      }
+      
+    } else {
+      
+      plot.new()
+      title(main = paste(antigen, "Background"))
+      text(0.5, 0.5, "No background data found")
+      
+    }
+    
+    # Legend
+    legend(
+      "bottom",
+      legend = c(
+        "Mean", "+/- 1 SD", "+/- 2 SD", "+/- 3 SD"),
+      lty = c(1, 3, 2, 4),
+      horiz = TRUE,
+      xpd = TRUE,
+      bty = "n",
+      cex = 0.8
+    )
+    
+    par(mfrow = c(1, 1))
   }
+  
 }
+
+  # if (by_var=="date") {
+  # 
+  #   par(oma=c(3,1,1,1),mfrow=c(2,4),mar=c(5.1,4.1,4.1,2.1))
+  #   
+  #   # Plot each antigen
+  #   for (antigen in ag_list) {
+  #     
+  #     par(mfrow = c(1, 2))
+  #     
+  #     # Standard control plot
+  #     values <- suppressWarnings(
+  #       as.numeric(as.character(std_selected[[antigen]]))
+  #     )
+  #     
+  #     valid <- is.finite(values) & !is.na(std_selected[[x_var]])
+  #     
+  #     plot_data <- std_selected[valid, , drop = FALSE]
+  #     values <- values[valid]
+  #     
+  #     if (length(values) > 0) {
+  #       
+  #       mean_value <- mean(values)
+  #       sd_value <- sd(values)
+  #       
+  #       reference_lines <- mean_value +
+  #         c(-3, -2, -1, 0, 1, 2, 3) * sd_value
+  #       
+  #       y_limits <- range(
+  #         c(values, reference_lines),
+  #         finite = TRUE
+  #       )
+  #       
+  #       if (diff(y_limits) == 0) {
+  #         y_limits <- y_limits + c(-1, 1)
+  #       }
+  #       
+  #       plot(
+  #         plot_data[[x_var]],
+  #         values,
+  #         pch = 21,
+  #         col = "black",
+  #         bg = "darkblue",
+  #         ylim = y_limits,
+  #         ylab = "Median MFI",
+  #         xlab = x_label,
+  #         main = paste(antigen, dilution)
+  #       )
+  #       
+  #       abline(h = mean_value, lty = 1, lwd = 2)
+  #       abline(h = mean_value + c(-1, 1) * sd_value, lty = 3)
+  #       abline(h = mean_value + c(-2, 2) * sd_value, lty = 2)
+  #       abline(h = mean_value + c(-3, 3) * sd_value, lty = 4)
+  #       
+  #       if (labels && "plate" %in% names(plot_data)) {
+  #         text(
+  #           plot_data[[x_var]],
+  #           values,
+  #           labels = plot_data$plate,
+  #           pos = 3,
+  #           cex = 0.6
+  #         )
+  #       }
+  #       
+  #     } else {
+  #       
+  #       plot.new()
+  #       title(main = paste(antigen, dilution))
+  #       text(0.5, 0.5, "No standard control data found")
+  #       
+  #     }
+  #     
+  #     # Background plot
+  #     blank_values <- suppressWarnings(
+  #       as.numeric(as.character(blank_all[[antigen]]))
+  #     )
+  #     
+  #     valid_blank <- is.finite(blank_values) &
+  #       !is.na(blank_all[[x_var]])
+  #     
+  #     blank_data <- blank_all[valid_blank, , drop = FALSE]
+  #     blank_values <- blank_values[valid_blank]
+  #     
+  #     if (length(blank_values) > 0) {
+  #       
+  #       blank_mean <- mean(blank_values)
+  #       blank_sd <- sd(blank_values)
+  #       
+  #       blank_lines <- blank_mean +
+  #         c(-3, -2, -1, 0, 1, 2, 3) * blank_sd
+  #       
+  #       blank_limits <- range(
+  #         c(blank_values, blank_lines),
+  #         finite = TRUE
+  #       )
+  #       
+  #       if (diff(blank_limits) == 0) {
+  #         blank_limits <- blank_limits + c(-1, 1)
+  #       }
+  #       
+  #       plot(
+  #         blank_data[[x_var]],
+  #         blank_values,
+  #         pch = 21,
+  #         col = "black",
+  #         bg = "grey60",
+  #         ylim = blank_limits,
+  #         ylab = "Median MFI",
+  #         xlab = x_label,
+  #         main = paste(antigen, "Background")
+  #       )
+  #       
+  #       abline(h = blank_mean, lty = 1, lwd = 2)
+  #       abline(h = blank_mean + c(-1, 1) * blank_sd, lty = 3)
+  #       abline(h = blank_mean + c(-2, 2) * blank_sd, lty = 2)
+  #       abline(h = blank_mean + c(-3, 3) * blank_sd, lty = 4)
+  #       
+  #       if ("plate" %in% names(blank_data)) {
+  #         text(
+  #           blank_data[[x_var]],
+  #           blank_values,
+  #           labels = blank_data$plate,
+  #           pos = 3,
+  #           cex = 0.6
+  #         )
+  #       }
+  #       
+  #     } else {
+  #       
+  #       plot.new()
+  #       title(main = paste(antigen, "Background"))
+  #       text(0.5, 0.5, "No background data found")
+  #       
+  #     }
+  #     
+  #     legend("bottom", 
+  #            legend = c(
+  #              "Mean",
+  #              "+/- 1 SD",
+  #              "+/- 2 SD",
+  #              "+/- 3 SD"),
+  #       lty = c(1, 3, 2, 4),
+  #       horiz = TRUE,
+  #       xpd = TRUE,
+  #       bty = "n",
+  #       cex = 0.8
+  #     )
+  #     
+  #     par(mfrow = c(1, 1))
+  #   }
+  #   
+  # }
+  
+### ### ### ### ### ### ### ### ### ### ##
+##### "levey.jennings.plot" function #####
+### ### ### ### ### ### ### ### ### ### ##  
+levey.jennings.plot <- function(sample_data, ag_list, plot_title) {
+    
+    # Keep only the columns needed for plotting
+    plot_data <- sample_data |>
+      dplyr::select(plate, Sample, dplyr::all_of(ag_list)) |>
+      tidyr::pivot_longer(
+        cols = dplyr::all_of(ag_list),
+        names_to = "Antigen",
+        values_to = "MFI"
+      ) |>
+      dplyr::mutate(
+        Plate = factor(as.character(plate)),
+        MFI = suppressWarnings(as.numeric(as.character(MFI)))
+      ) |>
+      dplyr::filter(is.finite(MFI))
+    
+    if (nrow(plot_data) == 0) {
+      stop("No valid MFI values were found for this plot.")
+    }
+    
+    # Calculate the mean and SD across all uploaded plates
+    reference_stats <- plot_data |>
+      dplyr::group_by(Antigen) |>
+      dplyr::summarise(
+        Mean = mean(MFI, na.rm = TRUE),
+        SD = sd(MFI, na.rm = TRUE),
+        .groups = "drop"
+      )
+    
+    # Classify point based on if it is outside SD and by how much
+    plot_data <- plot_data |>
+      dplyr::left_join(reference_stats, by = "Antigen") |>
+      dplyr::mutate(
+        SD_category = dplyr::case_when(
+          is.na(SD) | SD == 0 ~ "Within 1 SD",
+          abs(MFI - Mean) <= SD ~ "Within 1 SD",
+          abs(MFI - Mean) <= 2 * SD ~ "Outside 1 SD",
+          abs(MFI - Mean) <= 3 * SD ~ "Outside 2 SD",
+          TRUE ~ "Outside 3 SD"),
+        SD_category = factor(SD_category, levels = c("Within 1 SD", "Outside 1 SD", "Outside 2 SD", "Outside 3 SD")))
+    
+    # Create the mean and SD reference lines
+    reference_lines <- dplyr::bind_rows(
+      reference_stats |>
+        dplyr::transmute(Antigen, Line = "Mean", Value = Mean),
+      
+      reference_stats |>
+        dplyr::transmute(Antigen, Line = "1 SD", Value = Mean + SD),
+      
+      reference_stats |>
+        dplyr::transmute(Antigen, Line = "1 SD", Value = Mean - SD),
+      
+      reference_stats |>
+        dplyr::transmute(Antigen, Line = "2 SD", Value = Mean + 2 * SD),
+      
+      reference_stats |>
+        dplyr::transmute(Antigen, Line = "2 SD", Value = Mean - 2 * SD),
+      
+      reference_stats |>
+        dplyr::transmute(Antigen, Line = "3 SD", Value = Mean + 3 * SD),
+      
+      reference_stats |>
+        dplyr::transmute(Antigen, Line = "3 SD", Value = Mean - 3 * SD)
+    ) |>
+      dplyr::filter(is.finite(Value)) |>
+      dplyr::mutate(
+        Line = factor(
+          Line,
+          levels = c(
+            "Mean", "1 SD", "2 SD", "3 SD"
+          )
+        )
+      )
+    
+    # Create the faceted plot
+    p <- ggplot2::ggplot(
+      plot_data,
+      ggplot2::aes(
+        x = Plate,
+        y = MFI,
+        text = paste0(
+          "<b>Plate:</b> ", Plate,
+          "<br><b>Sample:</b> ", Sample,
+          "<br><b>Antigen:</b> ", Antigen,
+          "<br><b>MFI:</b> ", round(MFI, 1)
+        )
+      )
+    ) +
+      ggplot2::geom_point(aes(colour = SD_category), size = 2.5, alpha = 0.8) +
+      ggplot2::scale_colour_manual(values = c(
+          "Within 1 SD" = "#2684C7",
+          "Outside 1 SD" = "#F0E442", # "#F4C542"
+          "Outside 2 SD" = "#D55E00", #"#F28E2B","#E69F00"
+          "Outside 3 SD" = "#DC267F" #"#D62728"  
+        ),
+        breaks = c(
+          "Within 1 SD",
+          "Outside 1 SD",
+          "Outside 2 SD",
+          "Outside 3 SD"
+        ),
+        name = "Control variation") +
+      guides(color = "none") +
+      ggplot2::geom_hline(data = reference_lines, ggplot2::aes(yintercept = Value, linetype = Line), colour = "grey35", linewidth = 0.6) +
+      ggplot2::facet_wrap(~ Antigen, scales = "free_y", ncol = 3) +
+      ggplot2::scale_linetype_manual(
+        values = c(
+          # "Mean" = "solid",
+          "1 SD" = "dotted",
+          "2 SD" = "dashed",
+          "3 SD" = "dotdash")
+      ) +
+      ggplot2::labs(
+        title = plot_title,
+        x = "Plate",
+        y = "Median MFI"
+      ) +
+      ggplot2::theme_minimal(base_size = 12) +
+      ggplot2::theme(
+        axis.text.x = ggplot2::element_text(
+          angle = 35,
+          hjust = 1
+        ),
+        strip.text = ggplot2::element_text(face = "bold"),
+        legend.position = "bottom",
+        # panel.spacing = grid::unit(0.7, "lines")
+        panel.spacing = unit(0.5, "lines"),
+        legend.box.margin = margin(t = -10),
+        legend.margin = margin(t = -5),
+        plot.margin = margin(
+          t = 5,
+          r = 5,
+          b = 0,
+          l = 5
+        )
+      )
+    
+    return(p)
+  }
+  
 
 
 ### ### ### ### ### ### ### ### ### ##

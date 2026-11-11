@@ -16,6 +16,108 @@
     #  
     # ),
 
+## Standard curve
+## Visual to see if the std dataset is created correctly
+# output$std_table <- DT::renderDataTable({
+#   
+#   req(std_data(), user_dilutions())
+#   
+#   mapping <- standard_mapping()
+#   plates <- std_data()$plates
+#   antigen <- input$std_curve_antigen
+#   # dilutions <- user_dilutions()
+#   
+#   # # Get the standard names submitted on the Upload page
+#   # labels <- submitted_standards()
+#   
+#   standard_tables <- lapply(names(plates), function(plate_name) {
+#     
+#     pd <- plates[[plate_name]]
+#     
+#     if (is.null(pd) ||
+#         !"Sample" %in% names(pd) ||
+#         !antigen %in% names(pd)) {
+#       return(NULL)
+#     }
+#     
+#     sample_names <- tolower(trimws(as.character(pd$Sample)))
+#     submitted_names <- tolower(trimws(mapping$Sample))
+#     
+#     match_index <- match(sample_names, submitted_names)
+#     keep <- !is.na(match_index)
+#     
+#     if (!any(keep)) return(NULL)
+#     
+#     matched <- mapping[match_index[keep], , drop = FALSE]
+#     
+#     well <- if ("Location" %in% names(pd)) {
+#       as.character(pd$Location[keep])
+#     } else {
+#       rep(NA_character_, sum(keep))
+#     }
+#     
+#     result <- data.frame(
+#       Plate = plate_name,
+#       Well = well,
+#       Sample = as.character(pd$Sample[keep]),
+#       Dilution = matched$Dilution,
+#       DilutionFactor = matched$DilutionFactor,
+#       DilutionOrder = matched$DilutionOrder,
+#       Antigen = antigen,
+#       MFI = suppressWarnings(
+#         as.numeric(as.character(pd[[antigen]][keep]))
+#       ),
+#       stringsAsFactors = FALSE
+#     )
+#     
+#     result
+#   })
+#   
+#   standard_tables <- Filter(
+#     function(x) !is.null(x) && nrow(x) > 0,
+#     standard_tables
+#   )
+#   
+#   validate(
+#     need(
+#       length(standard_tables) > 0,
+#       "No submitted standard sample labels matched the uploaded plates."
+#     )
+#   )
+#   
+#   combined <- do.call(rbind, standard_tables)
+#   
+#   combined <- combined[
+#     order(combined$Plate, combined$DilutionOrder),
+#     ,
+#     drop = FALSE
+#   ]
+#   
+#   rownames(combined) <- NULL
+#   
+#   DT::datatable(
+#     combined,
+#     options = list(
+#       pageLength = 25,
+#       scrollX = TRUE
+#     ),
+#     rownames = FALSE
+#   )
+# })
+
+#   # Allow user to select up to 5 plates for comparison (compare standard curves visually) 
+# output$std_curve_plate_selection <- renderUI({
+#   req(d())
+#   selectizeInput(
+#     inputId = "std_curve_input",
+#     label = "",
+#     choices = d()$platenames,
+#     selected = d()$platenames,   # ← defaults to first plate so plot renders immediately
+#     multiple = TRUE # ,
+#     # options = list(maxItems = 5)
+#   )
+# })
+
 ## Dilutions
 
   # Defines a default set of dilutions
